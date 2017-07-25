@@ -1,0 +1,17 @@
+{
+  "name": "xtract-chat",
+  "version": "1.0.0",
+  "description": "Multiplayer Server",
+  "main": "multi-server.js",
+  "dependencies": {
+    "bluebird": "^3.4.7",
+    "pmx": "^1.0.1",
+    "redis": "^2.6.5"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Brian Noriega",
+  "license": "MIT"
+}

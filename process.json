@@ -1,0 +1,19 @@
+{
+    "apps" : [
+        {
+            "name"              : "node-multiplayer",
+            "script"            : "multi-server.js",
+            "ignore_watch"     : ["node_modules", "logs", ".*"],
+            "exec_mode"         : "cluster",
+            "instances"         : 0,
+            "autorestart"       : true,
+            "kill_timeout"      : 3000,
+            "restart_delay"     : 3000,
+            "max_restarts"      : 10,
+            "cron_restart"     : "0 3 * * 3",
+            "error_file"        : "logs/node-multi.log",
+            "out_file"          : "logs/node-multi.log",
+            "log_date_format"   : "YYYY-MM-DD HH:mm Z"
+        }
+    ]
+}
