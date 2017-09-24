@@ -1,0 +1,35 @@
+{
+  "name": "xtract-chat",
+  "version": "2.0.0",
+  "description": "Version 2 of the multiplayer server with better knowledge of node (see v1 for the first push)",
+  "private": true,
+  "scripts": {
+    "start": "",
+  },
+  "author": "Brian Noriega",
+  "license": "MIT",
+  "devDependencies": {
+    "chai": "^4.1.2"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.0",
+    "body-parser": "^1.17.2",
+    "bull": "^3.1.0",
+    "debug": "^3.0.1",
+    "express": "^4.15.3",
+    "express-validator": "^3.2.1",
+    "ioredis": "^3.1.4",
+    "node-gcm": "^0.14.6",
+    "request": "^2.81.0",
+    "supports-color": "^4.4.0",
+    "uuid": "^3.1.0"
+  },
+  "presets": [
+    [
+      "es2015",
+      {
+        "modules": false
+      }
+    ]
+  ]
+}
