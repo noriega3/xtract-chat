@@ -6,8 +6,12 @@ local rk = {
     roomInfo                = "rooms|"..KEYS[1].."|info",
 }
 local clientRoomName    = KEYS[1]
-local currentTime       = KEYS[2]
-local message           = cjson.decode(KEYS[3]) or {}
+local currentTime       = redis.call('get', 'serverTime')
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
+
+local message           = cjson.decode(KEYS[2]) or {}
 local ignoreChecks      = ARGV[1] == 'FORCE'
 local roomExists        = redis.call('exists', rk.roomInfo) == 1
 
@@ -53,6 +57,6 @@ if(ignoreChecks or roomExists) then --for unsubscribe, we will push the message 
 	end
 end
 
-return redis.error_reply('ROOM NOT FOUND '..KEYS[1])
+return redis.status_reply('ROOM NOT FOUND '..KEYS[1])
 
 

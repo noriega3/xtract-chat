@@ -4,12 +4,17 @@ local _stringformat = string.format
 
 local sessionId             = KEYS[1]
 local roomPath              = KEYS[2]
-local currentTime           = KEYS[3]
-local maxSubscribers        = _tonumber(KEYS[4])
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
+
+local maxSubscribers        = _tonumber(KEYS[3])
 local expireTime            = currentTime+30000
 local rk = {
-    countsRooms             = "counts|rooms", --for dashboard
-    roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
+	countsRooms             = "counts|rooms", --for dashboard
+	roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
 }
 
 local removeHexReserve = function(subject,predicate,object)
@@ -90,29 +95,29 @@ end
 
 local reserveRoom = function(roomName)
 
-    rk = {
-        countsRooms             = "counts|rooms", --for dashboard
-        roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
-        hexSessionsToRooms      = "hex|sessions:rooms",
-        tickRooms               = "tick|rooms",
-        tickSessions            = "tick|sessions",
-        tickReserves            = "tick|reserves",
-        session                 = "sessions|"..KEYS[1],
-        sessionReserves         = "sessions|"..KEYS[1].."|reserves",
-        roomName                = "rooms|"..roomName,
-        roomHistory             = "rooms|"..roomName.."|history",
-        roomMessages            = "rooms|"..roomName.."|messages",
-        roomInfo                = "rooms|"..roomName.."|info",
-        roomReserves            = "rooms|"..roomName.."|reserves" --will hold expiration time
-    }
+	rk = {
+		countsRooms             = "counts|rooms", --for dashboard
+		roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
+		hexSessionsToRooms      = "hex|sessions:rooms",
+		tickRooms               = "tick|rooms",
+		tickSessions            = "tick|sessions",
+		tickReserves            = "tick|reserves",
+		session                 = "sessions|"..KEYS[1],
+		sessionReserves         = "sessions|"..KEYS[1].."|reserves",
+		roomName                = "rooms|"..roomName,
+		roomHistory             = "rooms|"..roomName.."|history",
+		roomMessages            = "rooms|"..roomName.."|messages",
+		roomInfo                = "rooms|"..roomName.."|info",
+		roomReserves            = "rooms|"..roomName.."|reserves" --will hold expiration time
+	}
 
-    --update session or return error when doesnt exist
-    redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
+	--update session or return error when doesnt exist
+	redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
 	local isRoomExist = redis.call('exists', rk.roomName) == 1
 	local searchTerm = '[pos||is-sub-of||'..roomName..'||'
 
-    --check if room counts are valid if we add this person into the reserves
-    local numSubscribers = redis.call('zlexcount', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')
+	--check if room counts are valid if we add this person into the reserves
+	local numSubscribers = redis.call('zlexcount', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')
 
 	--refresh the amount of users in roomPath (just an update does not add the reserve)
 	redis.call('zadd', rk.countsRooms, numSubscribers, roomName)
@@ -144,31 +149,31 @@ local reserveRoom = function(roomName)
 	--add sessionId to reserves list
 	redis.call('zadd',rk.roomReserves,expireTime,sessionId)
 
-    return roomName
+	return roomName
 end
 
 local findAndReserveAvailableRoom = function(roomPath)
 
-    local roomsList = redis.call('zrangebyscore', rk.roomPathCounts, 0, "("..maxSubscribers, 'LIMIT', 0, 9)
+	local roomsList = redis.call('zrangebyscore', rk.roomPathCounts, 0, "("..maxSubscribers, 'LIMIT', 0, 9)
 
-    local roomReserved
-    if(#roomsList > 0) then
-        for x=1, #roomsList do
-            local result = reserveRoom(roomsList[x])
-            if(result) then
-                roomReserved = result
-                --break out and give the result
-                return result
-            end
-        end
-    end
+	local roomReserved
+	if(#roomsList > 0) then
+		for x=1, #roomsList do
+			local result = reserveRoom(roomsList[x])
+			if(result) then
+				roomReserved = result
+				--break out and give the result
+				return result
+			end
+		end
+	end
 
-    if(roomReserved) then return reserveRoom end
+	if(roomReserved) then return reserveRoom end
 
-    --make reservation to a new room
-    local roomId = redis.call('incr', 'ids|rooms')
-    local newRoomName = roomPath..":"..roomId
-    return reserveRoom(newRoomName)
+	--make reservation to a new room
+	local roomId = redis.call('incr', 'ids|rooms')
+	local newRoomName = roomPath..":"..roomId
+	return reserveRoom(newRoomName)
 end
 
 return findAndReserveAvailableRoom(roomPath)

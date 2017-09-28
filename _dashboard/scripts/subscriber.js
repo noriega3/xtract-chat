@@ -40,6 +40,7 @@ function SubClient(data){
 
 		if (jsonStart !== -1 && jsonEnd !== -1) {
 			let bufStr = dataRaw.toString('utf8', jsonStart + 15, jsonEnd)
+
 			let response = bufStr && JSON.parse(bufStr)
 			let phase = (response && response.phase) ? response.phase : false
 			let eventId = (response && response.eventId) ? response.eventId : false

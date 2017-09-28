@@ -2,7 +2,7 @@ local _stringformat = string.format
 local _unpack = unpack
 
 local sessionId  = KEYS[1]
-local currentTime  = KEYS[2]
+local currentTime = redis.call('get', 'serverTime')
 local sessionData = ARGV
 local sessionClientRoom = "sessions:"..sessionId
 
@@ -40,7 +40,7 @@ for x=1, #sessionData, 2 do
     mapped[sessionData[x]] = sessionData[x+1]
 end
 
-redis.call('hmset', rk.session, _unpack(sessionData))
+local isSet = redis.call('hmset', rk.session, _unpack(sessionData))
 
 if(mapped.sessionId) then
 
@@ -69,6 +69,6 @@ if(mapped.sessionId) then
 	end
 end
 
-redis.call('zadd', rk.tickSessions, currentTime, sessionId)
+local isTickSet = isSet and redis.call('zadd', rk.tickSessions, currentTime, sessionId)
 
-return rooms
+return (isSet and isTickSet and #rooms > 0) and rooms or redis.error_reply('INIT ERROR')

@@ -28,7 +28,7 @@ const _error = debug("error")
 const addConfig = {
     attempts: 1,
 	timeout: 3000,
-	removeOnComplete: false
+	removeOnComplete: true
 }
 
 const SYSTEM_ROOM_TYPE = -1
@@ -87,7 +87,7 @@ roomSubQueue.process('subscribe', (job, done) => {
 			console.log('sub')
 			_error('[Error Subscribe]', err.status, err.message)
 
-			done('err')
+			done('err @ subscribe')
 			//if(job.attemptsMade > 3){
 
 			//throw new Error('Error '+ err.toString())
@@ -209,13 +209,13 @@ roomSubQueue.process('onPlayerSubscribe', (job) => {
 				room: response.roomName,
 				response: response
 			})
-			return client.publishToRoom(response.roomName, Date.now(), message)
+			return client.publishToRoom(response.roomName, message)
 		})
 		.then((result) => {
 			prepareResponse = {}
-
 			return [roomType,roomName]
 		})
+		.tapCatch(_error)
 		.catch((err) => {
 			_error('[Error OnSubscribe]', err)
 		})
@@ -278,12 +278,13 @@ roomUpdateQueue.process('roomUpdate', (job) => {
 		})
 
 		.then((response) => {
+			const serverTime = globals.getVariable("SERVER_TIME")
 			const message = JSON.stringify({
 				phase: "roomUpdate",
 				room: response.roomName,
 				response: response
 			})
-			return client.publishToRoom(response.roomName, Date.now(), message)
+			return client.publishToRoom(response.roomName, message)
 		})
 		.then((result) => {
 			prepareResponse = {}
@@ -374,12 +375,13 @@ roomSubQueue.process('onPlayerUnSubscribe', (job) => {
 		})
 
 		.then((response) => {
+			const serverTime = globals.getVariable("SERVER_TIME")
 			const message = JSON.stringify({
 				phase: "roomUpdate",
 				room: response.roomName,
 				response: response
 			})
-			return client.publishToRoom(response.roomName, Date.now(), message)
+			return client.publishToRoom(response.roomName, message)
 		})
 		.then((result) => {
 			prepareResponse = {}
@@ -395,9 +397,10 @@ roomSubQueue.process('publish', (job, done) => {
     const data = job.data
     const skipChecks = data.skipChecks ? 'FORCE' : ''
     const message = data.message
+	const serverTime = globals.getVariable("SERVER_TIME")
 
-	_log('publishing', data)
-    client.publishToRoom(message.room, Date.now(), JSON.stringify(message), skipChecks)
+	_log('publishing', serverTime)
+    client.publishToRoom(message.room, JSON.stringify(message), skipChecks)
         .then((results) => {
     	_log('published message', message.room, results)
     		done(false, 'OK')
@@ -410,8 +413,9 @@ roomSubQueue.process('publish', (job, done) => {
 
 roomQueue.process('sendChatToRoom', (job) => {
     const data = job.data
+	const serverTime = globals.getVariable("SERVER_TIME")
 
-    return client.sendChatToRoom(data.sessionId, data.room, data.message, data.eventId, Date.now())
+    return client.sendChatToRoom(data.sessionId, data.room, data.message, data.eventId, serverTime)
         .then((results) => {
         })
         .catch((err) => {
@@ -446,6 +450,7 @@ roomQueue.process('prepareSyncSessionData', (job) => {
     const auth              = eventParams.auth
     const forceRoomUpdate   = eventParams.forceRoomUpdate
     const paramsMsg         = JSON.stringify(eventParams)
+	const serverTime 		= globals.getVariable("SERVER_TIME")
 
     const validateAuths = () => {
         return client.validateAuths(sessionId, auth).then((result) => result)
@@ -473,7 +478,7 @@ roomQueue.process('prepareSyncSessionData', (job) => {
         validateNumber(level),
         validateNumber(subCurrency)
     ])
-        .then((result) => client.prepareRoomEvent(sessionId, "sessions:" + sessionId, eventId, 'syncSessionData', Date.now(), paramsMsg, 'sendRoomEvent', 'syncSessionDataResponse'))
+        .then((result) => client.prepareRoomEvent(sessionId, "sessions:" + sessionId, eventId, 'syncSessionData', serverTime, paramsMsg, 'sendRoomEvent', 'syncSessionDataResponse'))
         .then((result2) => {
         })
 /*        .catch((err) => {
@@ -485,7 +490,7 @@ roomQueue.process('syncSessionData', (job) => {
     const sessionId         = data.sessionId
     const forceRoomUpdate   = data.forceRoomUpdate
 
-    return client.updateSessionData(sessionId, Date.now(),
+    return client.updateSessionData(sessionId,
         'username', data.username,
         'score', data.score,
         'avatar', data.avatar,
@@ -514,6 +519,7 @@ roomQueue.process('prepareRoomEvent', (job) => {
     const eventTable    = data.params
     const eventName        = eventTable.event
     const eventParams      = eventTable.data
+	const serverTime = globals.getVariable("SERVER_TIME")
 
     //we process the function in, then when user verifies our send back,
     //we post the results to the specified room
@@ -525,7 +531,7 @@ roomQueue.process('prepareRoomEvent', (job) => {
         }
         return roomEvents[eventFunctName](sessionId, eventParams)
             .then((eventResponse) => {
-               return client.prepareRoomEvent(sessionId, roomName, eventId, eventName, Date.now(), JSON.stringify(eventResponse), 'sendRoomEvent', 'receiveRoomEvent')
+               return client.prepareRoomEvent(sessionId, roomName, eventId, eventName, serverTime, JSON.stringify(eventResponse), 'sendRoomEvent', 'receiveRoomEvent')
             })
     }
 
@@ -539,14 +545,18 @@ roomQueue.process('prepareRoomEvent', (job) => {
 
 roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room queue processing.
     const data = job.data
+	const serverTime = globals.getVariable("SERVER_TIME")
 
     const sessionId = data.sessionId
     const eventId   = data.eventId
 
-    return client.verifyRoomEvent(sessionId, eventId, Date.now())
+    return client.verifyRoomEvent(sessionId, eventId, serverTime)
         .then((jsoned) => {
             let eventName = eventId.split('|')[1]
-            let parsed = JSON.parse(jsoned)
+
+			_log('json sub', jsoned)
+
+			let parsed = JSON.parse(jsoned)
             if(!eventName) throw new Error('no event name found')
 
             _log('-----event found -0---')
@@ -560,11 +570,6 @@ roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room q
 /*        .catch((err) => {
         })*/
 })
-
-roomGameEventQueue.process('onTurnEnd', (job) =>{
-
-})
-
 /*roomQueue.process('roomUpdate', (job, done) => {
     const data = job.data
 
@@ -615,12 +620,15 @@ roomQueue.process('expireCheck', (job) => {
 //Check those rooms who are past the tick update time.
 roomSubQueue.process((job) => {
 	_log('room queue process')
-	return roomActions.commandRoomTick(job)
+	return roomActions.updateServerTime().then(() => {
+			return roomActions.commandRoomTick(job)
+		}
+	)
 })
 roomSubQueue.add({}, {repeat: { cron: '*/2 * * * * *'}})
 
 client.defineCommand('publishToRoom', {
-    numberOfKeys: 3,
+    numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/publishToRoom.lua", "utf8")
 })
 

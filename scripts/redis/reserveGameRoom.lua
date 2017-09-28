@@ -4,9 +4,14 @@ local _stringformat = string.format
 
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
-local currentTime           = KEYS[3]
-local maxSubscribers        = _tonumber(KEYS[4])
-local roomArr               = cjson.decode(KEYS[5])
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
+
+local maxSubscribers        = _tonumber(KEYS[3])
+local roomArr               = cjson.decode(KEYS[4])
 local roomPath				= roomArr.roomPath
 local expireTime            = currentTime+30000
 local rk = {
@@ -92,29 +97,29 @@ end
 
 local reserveRoom = function()
 
-    rk = {
-        countsRooms             = "counts|rooms", --for dashboard
-        roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
-        hexSessionsToRooms      = "hex|sessions:rooms",
-        tickRooms               = "tick|rooms",
-        tickSessions            = "tick|sessions",
-        tickReserves            = "tick|reserves",
-        session                 = "sessions|"..KEYS[1],
-        sessionReserves         = "sessions|"..KEYS[1].."|reserves",
-        roomName                = "rooms|"..clientRoomName,
-        roomHistory             = "rooms|"..clientRoomName.."|history",
-        roomMessages            = "rooms|"..clientRoomName.."|messages",
-        roomInfo                = "rooms|"..clientRoomName.."|info",
-        roomReserves            = "rooms|"..clientRoomName.."|reserves" --will hold expiration time
-    }
+	rk = {
+		countsRooms             = "counts|rooms", --for dashboard
+		roomPathCounts          = "counts|"..roomPath, --for reserve searching rooms
+		hexSessionsToRooms      = "hex|sessions:rooms",
+		tickRooms               = "tick|rooms",
+		tickSessions            = "tick|sessions",
+		tickReserves            = "tick|reserves",
+		session                 = "sessions|"..KEYS[1],
+		sessionReserves         = "sessions|"..KEYS[1].."|reserves",
+		roomName                = "rooms|"..clientRoomName,
+		roomHistory             = "rooms|"..clientRoomName.."|history",
+		roomMessages            = "rooms|"..clientRoomName.."|messages",
+		roomInfo                = "rooms|"..clientRoomName.."|info",
+		roomReserves            = "rooms|"..clientRoomName.."|reserves" --will hold expiration time
+	}
 
-    --update session or return error when doesnt exist
-    redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
+	--update session or return error when doesnt exist
+	redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
 	local isRoomExist = redis.call('exists', rk.roomName) == 1
-    local searchTerm = '[pos||is-sub-of||'..clientRoomName..'||'
+	local searchTerm = '[pos||is-sub-of||'..clientRoomName..'||'
 
-    --check if room counts are valid if we add this person into the reserves
-    local numSubscribers = redis.call('zlexcount', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')
+	--check if room counts are valid if we add this person into the reserves
+	local numSubscribers = redis.call('zlexcount', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')
 
 	--refresh the amount of users in roomPath (just an update does not add the reserve)
 	redis.call('zadd', rk.countsRooms, numSubscribers, clientRoomName)
@@ -143,10 +148,10 @@ local reserveRoom = function()
 		publishConnecting(seatIndex)
 	end
 
-    --add sessionId to reserves list
-    redis.call('zadd',rk.roomReserves,expireTime,sessionId)
+	--add sessionId to reserves list
+	redis.call('zadd',rk.roomReserves,expireTime,sessionId)
 
-    return clientRoomName
+	return clientRoomName
 end
 
 return reserveRoom()

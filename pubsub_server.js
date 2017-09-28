@@ -52,7 +52,7 @@ _logserver("[Starting] %s", SERVER_NAME)
 
 /**
  * PubSub Server - 90%
- *  (X) requires node 8.x.x with --harmony flag to enable es2017/es6/es2015 features
+ *  (X) requires node 8.1.x with --harmony flag to enable es2017/es6/es2015 features
  *  (X) test suite to ensure bugs that are fixed are double checked to ensure all use cases are covered down the line.
  *  (X) redsmin - able to see it a bit better by using rooms| prefix for rooms.
  *  (X) system reserved rooms separated from normal rooms
@@ -189,3 +189,7 @@ process.on('uncaughtException', (err) => {
     _log('[Process Error] Uncaught Exception\n%s', err.toString())
     process.exit(1)
 })
+
+
+
+

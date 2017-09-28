@@ -23,7 +23,7 @@ Redis.Promise.onPossiblyUnhandledRejection(function (error) {
 	// error.command.name is the command name, here is 'set'
 	// error.command.args is the command arguments, here is ['foo']
 	if(error.command && error.command.name && error.command.args){
-		_error("[Redis Error] %s\n%0",error.command.name, error.command.args)
+		_error("[Redis Error] %s",error.command.name, error.command.args, error)
 	}
 });
 

@@ -20,8 +20,12 @@ local rk = {
     sessionHistory  = "sessions|"..KEYS[1].."|history"
 }
 local sessionId 	= KEYS[1]
-local currentTime 	= KEYS[2]
-local isExpired = ARGV[1] == 'expired'
+local isExpired 	= ARGV[1] == 'expired'
+local currentTime   = redis.pcall('get', 'serverTime')
+currentTime = not currentTime and -99 or currentTime
+
+--set a destroying flag to true
+redis.call('hset', rk.session, 'destroying', 1)
 
 --Remove hexastores for session associated with user id or whatever
 local isBot = redis.call('hexists', rk.session, 'bot') == 1

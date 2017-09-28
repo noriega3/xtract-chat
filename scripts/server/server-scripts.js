@@ -11,6 +11,8 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 	subClient 		= dbSubscriber
 	settingsClient 	= dbSettings
 
+
+
 	client.defineCommand('hexAdd', {
 		numberOfKeys: 1,
 		lua: fs.readFileSync("./scripts/redis/hexAdd.lua", "utf8")
@@ -37,7 +39,7 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 	})
 
 	client.defineCommand('updateSessionData', {
-		numberOfKeys: 2,
+		numberOfKeys: 1,
 		lua: fs.readFileSync("./scripts/events/updateSessionData.lua", "utf8")
 	})
 
@@ -51,9 +53,23 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 		lua: fs.readFileSync("./scripts/redis/prepareRoomEvent.lua", "utf8")
 	})
 
+	client.defineCommand('incrServerTick', {
+		numberOfKeys: 0,
+		lua: fs.readFileSync("./scripts/events/incrServerTime.lua", "utf8")
+	})
+
+	client.defineCommand('getServerTick', {
+		lua: fs.readFileSync("./scripts/events/getServerTime.lua", "utf8")
+	})
+
 	//Clear db 0 from last session
-	dbClient.flushdb()
-	dbClient.script('flush')
+	dbClient.multi()
+		.flushdb()
+		.script('flush')
+		.set('serverTime', Date.now())
+		.exec()
+		.tapCatch((err) => _error('err @ serverTime', err))
+	globals.setVariable("SERVER_TIME", Date.now())
 }
 
 scripts.updateServerConfig = () => {

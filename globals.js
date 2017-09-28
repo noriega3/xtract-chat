@@ -8,13 +8,20 @@ const _log          = debug('globals')
 const sockets = {}
 
 'use strict'
+const isNumeric = (n) => !isNaN(parseFloat(n)) && isFinite(n)
 
 let globals = Object.assign({
     clientSocketsList: [],
     sockets: sockets,
     isMaintenanceMode: false,
     //universal functions
-    getVariable: (keyName) => globals[keyName],
+    getVariable: (keyName) => {
+    	const value = globals[keyName]
+		if(value && isNumeric(value)){
+			return parseFloat(value)
+		}
+		return value
+	},
     setVariable: (keyName, value) => globals[keyName] = value,
     removeVariable: (keyName, index) => {
         globals[keyName][index] = null

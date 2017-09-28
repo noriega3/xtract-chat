@@ -17,9 +17,13 @@ end
 local roomType = 0
 local sessionId = KEYS[1]
 local clientRoomName = KEYS[2]
-local currentTime = KEYS[3]
-local isBotsEnabled = _tonumber(KEYS[4])
-local maxSubscribers = KEYS[5]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
+local isBotsEnabled = _tonumber(KEYS[3])
+local maxSubscribers = KEYS[4]
 local maxObservers
 
 local rk = {
@@ -42,7 +46,7 @@ if(maxSubscribers == "LIMIT") then
 end
 
 --update session or return error when doesnt exist
-if(redis.call('zadd', rk.tickSessions, 'XX', 'CH', currentTime, sessionId) == 0) then
+if(redis.call('zadd', rk.tickSessions, 'XX', 'CH', 'INCR', currentTime, sessionId) == 0) then
 	return redis.error_reply('no session')
 end
 

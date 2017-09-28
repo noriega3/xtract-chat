@@ -16,7 +16,9 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 
     if(pattern === 'rooms|*'){
 
-        const parsed = JSON.parse(message)
+		_log('json roomms', message)
+
+		const parsed = JSON.parse(message)
 
         if(helper._isObject(parsed) && parsed.sessionIds && parsed.sessionIds.length > 0) {
 			const sessionIds = parsed.sessionIds
@@ -25,13 +27,13 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
         	if(parsed.messages){
 				//TODO: fix the buffer max
 				//multiple messages
-				for (msg of parsed.messages) {
+				Promise.map(parsed.messages, (msg) => {
 					_error(msg)
 
 
 					fullMessage = "__JSON__START__"+JSON.stringify(msg)+"__JSON__END__"
 					//Sends the message to the appropriate socket on the appropriate server that has the sessionid
-					Promise.resolve(Sockets.getSocketsBySessionIds(sessionIds))
+					return Promise.resolve(Sockets.getSocketsBySessionIds(sessionIds))
 						.map((socket) => {
 							socket.resume()
 
@@ -45,9 +47,10 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 						.then((results) => {
 							//TODO: add retries here
 						})
+				})
 
-				}
 			} else if(parsed.message){
+				_log('json single message', parsed.message)
 
         		const dataToSend = JSON.stringify(parsed.message)
 
@@ -85,6 +88,7 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
     }
 
     if(pattern === 'sessions|*'){
+		_log('json sessions', message)
 
         const parsed = JSON.parse(message)
 
@@ -123,6 +127,7 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 		_log('[Message]: %s', message)
 		_log('#-------------')
 
+		_log('json bot', message)
 
 		const parsed = JSON.parse(message)
 

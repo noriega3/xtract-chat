@@ -5,7 +5,11 @@ local roomType = 2
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
 local roomArr               = cjson.decode(KEYS[3])
-local currentTime           = KEYS[4]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 local response              = cjson.decode(ARGV[1])
 local numSubscribers        = 0
 
@@ -24,7 +28,8 @@ local rk = {
     roomHistory             = "rooms|"..KEYS[2].."|history",
     roomMessages            = "rooms|"..KEYS[2].."|messages",
     roomBots            	= "rooms|"..KEYS[2].."|bots",
-    roomReserves            = "rooms|"..KEYS[2].."|reserves"
+    roomReserves            = "rooms|"..KEYS[2].."|reserves",
+    roomOptIns            	= "rooms|"..KEYS[2].."|optIns"
 }
 local userId                = response and response.userId or redis.call('hget', rk.session, 'userId')
 local roomExists            = redis.call('exists', rk.roomInfo) == 1
@@ -92,6 +97,13 @@ local subscribeToRoom = function()
 			redis.call('sadd', rk.roomBots, sessionId)
 			redis.call('hincrby', rk.roomInfo, "bots", 1)
 		end
+
+		--TODO: this will be added to a network call
+		--add them to opted in list
+		local nextGameId 	= redis.call('hget', rk.roomInfo, 'gameId')
+		rk.roomOptIns 	= rk.roomOptIns..":"..nextGameId
+		redis.call('hset', rk.roomOptIns, seat, sessionId)
+
 		return true
 	end
 	return false, 'NO EXIST'

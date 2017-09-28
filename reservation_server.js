@@ -47,7 +47,14 @@ app.use(expressValidator({
             return !serverConfig.maintenanceMode
         },
         "isSessionNotExpired": (sessionId) => {
-            return redisClient.zscore('sessions|tick', sessionId).then((lastUpdate) => Date.now()-lastUpdate > 60000)
+			return redisClient.multi()
+				.get('serverTime')
+				.zscore('sessions|tick', sessionId)
+				.exec()
+				.then(([[err0, serverTime], [err1, lastUpdate]]) => {
+					if(err0 || err1){ return false }
+					return (serverTime-lastUpdate) > 60000
+				})
         },
         "isValidGameRoomPath": (roomName) => roomName.match('^(\\w+):(\\w+):([a-zA-Z]+)$'), //appname:game:theme:id
         "isValidGameRoomName": (roomName) => roomName.match('^(\\w+):(\\w+):(\\w+):([0-9]+)$'), //appname:game:theme:id
@@ -116,6 +123,7 @@ router.post('/room/reserve', (req, res) => {
     req.checkBody('appName', 'Invalid app name').notEmpty().isIn(serverConfig.appNameList).withMessage('App name is not added or is blocked')
     req.checkBody('roomArr', 'Invalid room name').notEmpty()
 
+	let serverTime
     //validate and trigger sanitize the values
     req.getValidationResult().then((result) => {
 
@@ -127,6 +135,8 @@ router.post('/room/reserve', (req, res) => {
             })
             return //end
         }
+
+        console.log('in reservation with ', req.body)
 
         const body = req.body
         const sessionId = body.sessionId
@@ -157,13 +167,13 @@ router.post('/room/reserve', (req, res) => {
         //Id was passed, so we reserve the exact room
         if(roomName && roomId){
 
-            return redisClient.reserveGameRoom(sessionId, roomName, Date.now(), maxSubscribers, JSON.stringify(roomArr), appendResponse)
+            return redisClient.reserveGameRoom(sessionId, roomName, maxSubscribers, JSON.stringify(roomArr), appendResponse)
                 .then((result) => {
             		if(!result){
             			if(isBot){
 							throw new Error('no room for bot')
 						} else {
-							return redisClient.findAndReserveGameRoom(sessionId, roomPath, Date.now(), maxSubscribers, appendResponse)
+							return redisClient.findAndReserveGameRoom(sessionId, roomPath, maxSubscribers, appendResponse)
 						}
 					}
                     return result
@@ -184,7 +194,7 @@ router.post('/room/reserve', (req, res) => {
         //we only have path or game room was full, so find and reserve a room
         if(roomPath){
 
-            return redisClient.findAndReserveGameRoom(sessionId, roomPath, Date.now(), maxSubscribers, appendResponse)
+            return redisClient.findAndReserveGameRoom(sessionId, roomPath, maxSubscribers, appendResponse)
                 .then((roomName) => {
                 _log('room rserve props', roomName)
                     res.json({
@@ -288,6 +298,27 @@ router.post('/admin/refresh/settings', (req, res) => {
 })
 
 /**
+ * @path /room/takeTurn
+ * @description consumes the user's turn for the user
+ */
+router.post('/room/takeTurn', (req, res) => {
+	req.check('', 'Server in in maintenance mode').checkMaintenanceMode()
+	req.checkBody('sessionId', 'Invalid session id was entered').notEmpty().isSessionNotExpired().withMessage('Session is expired')
+	req.checkBody('roomName', 'Invalid room was entered').notEmpty().contains(':').withMessage('Room was formatted incorrectly')
+	req.checkBody('details', 'Invalid details entered').notEmpty()
+	req.getValidationResult().then((result) => {
+		if (!result.isEmpty()) {
+			res.status(400).json({
+				status: false,
+				error: true,
+				message: result.array()[0].msg
+			})
+			return //end
+		}
+	})
+})
+
+/**
  * Config client is ready
  */
 redisConfigClient.on('ready', () => {
@@ -304,13 +335,18 @@ redisConfigClient.on('ready', () => {
 	})
 })
 
+redisClient.defineCommand('takeTurn', {
+	numberOfKeys: 5,
+	lua: fs.readFileSync("./scripts/redis/reserveGameRoom.lua", "utf8")
+})
+
 redisClient.defineCommand('reserveGameRoom', {
-    numberOfKeys: 5,
+    numberOfKeys: 4,
     lua: fs.readFileSync("./scripts/redis/reserveGameRoom.lua", "utf8")
 })
 
 redisClient.defineCommand('findAndReserveGameRoom', {
-    numberOfKeys: 4,
+    numberOfKeys: 3,
     lua: fs.readFileSync("./scripts/redis/findAndReserveGameRoom.lua", "utf8")
 })
 
@@ -350,4 +386,3 @@ process.on('uncaughtException', (err) => {
 	_log('[Process Error] Uncaught Exception: ', err.toString())
 	process.exit(1)
 })
-

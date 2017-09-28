@@ -4,7 +4,11 @@ local _stringformat = string.format
 local roomType = 0
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
-local currentTime           = KEYS[3]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 local response              = cjson.decode(ARGV[1])
 local numSubscribers        = 0
 

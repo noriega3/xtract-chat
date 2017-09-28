@@ -6,7 +6,7 @@ local rk = {
 }
 
 local sessionId             = KEYS[1]
-local currentTime           = KEYS[2]
+local currentTime           = redis.call('get', 'serverTime')
 
 --========================================================================
 -- Functions

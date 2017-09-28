@@ -6,7 +6,11 @@ local rk = {
 }
 
 local sessionId             = KEYS[1]
-local currentTime           = KEYS[2]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 
 --========================================================================
 -- Functions
@@ -23,7 +27,7 @@ response.sessionId      = sessionId
 response.serverReqTime  = currentTime
 
 --will return error if not existing
-redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
+local sessionAlive = redis.call('zadd', rk.tickSessions, 'XX', currentTime, sessionId)
 
 --encode message for redis
 local encoded = cjson.encode(dataToSend)
@@ -31,4 +35,4 @@ local encoded = cjson.encode(dataToSend)
 --publish message
 redis.call('publish', rk.session, encoded)
 
-return redis.status_reply('OK')
+return sessionAlive and redis.status_reply('OK') or redis.error_reply('SESSION EXPIRED')

@@ -106,6 +106,9 @@ if(#hexRemovals > 0) then
 	redis.call('zrem','hex|sessions:rooms', _unpack(hexRemovals))
 end
 
+--set a destroying flag to true
+redis.call('hset', rk.roomInfo, 'destroying', 1)
+
 --remove from global room ticker
 redis.call('zrem',rk.tickRooms,clientRoomName)
 

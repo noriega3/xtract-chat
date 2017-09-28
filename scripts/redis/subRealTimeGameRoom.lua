@@ -5,7 +5,11 @@ local roomType = 1
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
 local roomArr               = cjson.decode(KEYS[3])
-local currentTime           = KEYS[4]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 local response              = cjson.decode(ARGV[1]) or {}
 local numSubscribers        = 0
 

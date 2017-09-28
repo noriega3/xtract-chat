@@ -47,7 +47,10 @@ const helpers = {
 
         if(initStart !== -1 && initEnd !== -1){
             const bufStr        = socket.buffer.toString('utf8',initStart+8,initEnd)
-            const playerData    = JSON.parse(bufStr)
+			_log('json sub setup init', bufStr)
+
+			const playerData    = JSON.parse(bufStr)
+
             //return helpers.removeInitsFromBuffer(socket)
             sliced.fill(0)
             socket.bufferLen -= (initStart+initEnd+11)
@@ -113,6 +116,7 @@ const onSocketData = (socket, dataRaw) => {
         if(jsonStart !== -1 && jsonEnd !== -1){
 
             let bufStr = buf.toString('utf8',jsonStart+15,jsonEnd)
+			_log('json intent', bufStr)
 
             let data = JSON.parse(bufStr)
             let intent = (data && data.intent) ? data.intent : false

@@ -53,13 +53,17 @@ sessionQueue.process('init',(job) => {
 
     //Redis key name shortcuts
     const sessionRoom = helper._colon('sessions', sessionId)
+	const serverTime = globals.getVariable('SERVER_TIME')
 
     //adds playerData to the new object to be set in session:*id*
-    let sessionData = Object.assign({ sessionId:sessionId, online: true, created: _getTime() }, playerData)
+    let sessionData = Object.assign({ sessionId:sessionId, online: 1, created: _getTime() }, playerData)
     let objSessionData = helper._convertObjectToArray(sessionData)
     let roomList
 
-    return client.initSession(sessionId, Date.now(), objSessionData)
+
+	_log('INIT SERVER TIME', serverTime)
+
+    return client.initSession(sessionId, objSessionData)
         .then((rooms) => {
             roomList = helper._arrToSet(rooms)
             return roomSubQueue.add('subscribe', {
@@ -144,8 +148,9 @@ sessionQueue.process('keepAlive', (job,) => {
     const data = job.data
     const sessionId = data.sessionId
     const params = JSON.stringify(data.params) || {}
+    const serverTime = globals.getVariable("SERVER_TIME")
 
-    return client.keepAlive(sessionId, Date.now(), params)
+    return client.keepAlive(sessionId, params)
 	.then((result) => {
     	return 'OK'
     })
@@ -157,10 +162,9 @@ sessionQueue.process('keepAlive', (job,) => {
 
 //Run an expire check every second
 sessionQueue.process('expireCheck', (job) => {
-
 	_log('expire check')
 
-    return client.zrangebyscore('tick|sessions', 0, Date.now()-60000, 'LIMIT', 0, 10)
+    return client.getServerTime().then((serverTime) => client.zrangebyscore('tick|sessions', 0, serverTime-60000, 'LIMIT', 0, 10))
         .map((sessionId) => {
 		console.log('in map')
             console.log('[Expired Session]: ' + sessionId)
@@ -181,15 +185,9 @@ sessionQueue.process('expireCheck', (job) => {
 })
 
 sessionQueue.isReady().then(() => {
+	roomActions.updateServerTime()
 	//sessionQueue.add('expireCheck', {}, {repeat: { cron: '*/5 * * * * *'}, removeOnComplete: true})
 })
-
-
-client.defineCommand('destroySession', {
-	numberOfKeys: 2,
-	lua: fs.readFileSync("./scripts/redis/destroySession.lua", "utf8")
-})
-
 
 client.defineCommand('validateAuths', {
     numberOfKeys: 1,
@@ -197,18 +195,13 @@ client.defineCommand('validateAuths', {
 })
 
 client.defineCommand('keepAlive', {
-    numberOfKeys: 2,
+    numberOfKeys: 1,
     lua: fs.readFileSync("./scripts/events/keepAlive.lua", "utf8")
 })
 
 client.defineCommand('initSession', {
-    numberOfKeys: 2,
+    numberOfKeys: 1,
     lua: fs.readFileSync("./scripts/redis/initSession.lua", "utf8")
-})
-
-
-roomSubQueue.on('error', function(job, err){
-	_error('sub error', err)
 })
 
 sessionQueue.on('error', function(job, err){

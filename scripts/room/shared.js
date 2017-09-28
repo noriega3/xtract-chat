@@ -26,7 +26,7 @@ Restored “Server/multiplayer/v2/node_modules/deep-eql/node_modules/type-detect
 const addConfig = {
 	attempts: 1,
 	timeout: 5000,
-	removeOnComplete: false
+	removeOnComplete: true
 }
 const SYSTEM_ROOM_TYPE = -1
 const STANDARD_ROOM_TYPE = 0
@@ -38,12 +38,28 @@ const ERR_SESSION_DESTROYED = 1
 const isNumeric = (n) => !isNaN(parseFloat(n)) && isFinite(n)
 const isString = (n) => typeof n === 'string' || n instanceof String
 
+/***
+ * Get Timestamp from redis so syncs across all node servers
+ */
+shared.updateServerTime = () => {
+	let serverTime = false
+	return client.incrServerTick(1)
+		.then((newServerTime) => {
+			_log(newServerTime)
+			serverTime = newServerTime
+			globals.setVariable("SERVER_TIME", parseInt(serverTime))
+			_log('[Server Time]:', serverTime)
+			return serverTime
+		})
+		.tapCatch((err) => _error('error @ serverTime', err))
+}
 
 shared.getRoomTypeFromDb = (room) => {
 	_log('find room type')
 	return Promise.try(function(){ //can't use es6 for this
 		return client.hexSearch('hex|rooms:properties', true, 'spo', room, 'is-room-type')
-	}).then(function([type]){
+	})
+	.then(function([type]){
 		if(!type || !isNumeric(type)) throw new Error("no game type "+room)
 		return parseInt(type)
 	})
@@ -53,10 +69,10 @@ shared.getGameRoomBySessionId = (sessionId) => {
 	let gameRoom = false //ensure that this doesn't cache
 	return Promise.try(function(){ //can't use es6 for this
 		return client.hexSearch('hex|sessions:rooms', true, 'spo', sessionId, 'has-gameroom-of')
-	}).then(function([result]){
+	})
+	.then(function([result]){
 		gameRoom = result
-		if(!gameRoom || !isString(gameRoom)) throw new Error("no game room")
-		return gameRoom
+		return (!gameRoom || !isString(gameRoom)) ? gameRoom : false
 	})
 }
 
@@ -74,7 +90,7 @@ shared.checkSessionState = (sessionId, overwriteState) => {
 		state = overwriteState ? overwriteState.toString() : state
 
 		//check if valid state
-		if(!state || !isString(state) || state !== "true") throw new Error("session offline")
+		if(!state || !isNumeric(state) || parseInt(state) !== 1) throw new Error("SESSION OFFLINE")
 
 		//return state
 		return state
@@ -120,6 +136,7 @@ shared.removeBotFromRoom = (roomName) => {
 
 			const sessionRoom = helper._colon('session', sessionId)
 			const redisRoomName = helper._bar('bot', sessionId)
+			const serverTime = globals.getVariable("SERVER_TIME")
 
 			//send a message to the bot to d/c it.
 			const message = JSON.stringify({
@@ -129,7 +146,7 @@ shared.removeBotFromRoom = (roomName) => {
 				response: {
 					sessionId: sessionId,
 					room: roomName,
-					time: Date.now()
+					time: serverTime
 				}
 			})
 			return client.publish(redisRoomName, message)
@@ -138,11 +155,13 @@ shared.removeBotFromRoom = (roomName) => {
 
 shared.removeAllBotsFromRoom = (roomName) => {
 	const roomBotKey = helper._bar('rooms',roomName,'bots')
+
 	return client.smembers(roomBotKey)
 		.map((sessionId) => {
 			if(!sessionId){ return true }
 			const sessionRoom = helper._colon('session', sessionId)
 			const redisRoomName = helper._bar('bot', sessionId)
+			const serverTime = globals.getVariable("SERVER_TIME")
 
 			//send a message to the bot to d/c it.
 			const message = JSON.stringify({
@@ -152,7 +171,7 @@ shared.removeAllBotsFromRoom = (roomName) => {
 				response: {
 					sessionId: sessionId,
 					room: roomName,
-					time: Date.now()
+					time: serverTime
 				}
 			})
 			return client.publish(redisRoomName, message)
@@ -277,6 +296,7 @@ shared.filterReservations = ([sessionId, roomList]) => {
 		if(!(isNumeric(type)) || !room) return false //remove from array
 
 		const reservesKey = helper._bar('rooms',room, 'reserves')
+		const serverTime = globals.getVariable("SERVER_TIME")
 
 		switch (type) {
 			case SYSTEM_ROOM_TYPE:
@@ -285,7 +305,7 @@ shared.filterReservations = ([sessionId, roomList]) => {
 			case REALTIME_ROOM_TYPE:
 			case TURNBASED_ROOM_TYPE:
 				//keep in array
-				return client.zscore(reservesKey, sessionId).then((timeExpired) => isNumeric(timeExpired) ? timeExpired > Date.now() : false)
+				return client.zscore(reservesKey, sessionId).then((timeExpired) => isNumeric(timeExpired) ? timeExpired > serverTime : false)
 			default:
 				return false //remove from array
 		}
@@ -474,6 +494,7 @@ shared.roomUpdate = (roomName, type) => {
 				}
 			})
 			.then((response) => resolve(response))
+			.tapCatch(_error)
 			.catch((err) => reject(err.toString()))
 	})
 }
@@ -525,48 +546,47 @@ shared.setupRooms = ([sessionId, roomList]) => {
 		let multi = client.multi()
 		let setupList = []
 		let subList = []
-	//Setup multi
-	for (let [_,room] of roomList) {
-		multi.zscore('tick|rooms', room)
-	}
 
-	return multi.exec()
-		.tap(([err, result]) => {
-			_error('setup results', err, result);
-			multi = client.multi()
-		})
-		//return room name as part of this list
-		.each(([err, result], index) => {
-			const roomExists = isNumeric(result)
-			const roomArr = roomList[index]
-			const [type, room] = roomArr
-			if(roomExists){
+		//Setup multi
+		for (let [_,room] of roomList) {
+			multi.zscore('tick|rooms', room)
+		}
 
-				return subList.push(roomArr)
-			} else {
-				setupList.push(roomArr)
-				return shared.setupRoom(sessionId, room, type, multi)
-
-			}
-		})
-		.then(() => {
-			if(setupList.length > 0){
-				return multi.exec()
-			} else {
-				multi.discard()
-				return []
-			}
-		})
-		.each(([err, setupResult], index) => {
-			_error('n setup', err, setupResult, setupList[index]);
-			//verify the result
-			if(err || !setupResult){ return false }
-			subList.push(setupList[index])
-		})
-		.tapCatch((err)=> { _error('error on setup', err); multi.discard()})
-		.then(() => {
-			return [sessionId, subList]
-		})
+		return multi.exec()
+			.tap(([err, result]) => {
+				_error('setup results', err, result);
+				multi = client.multi()
+			})
+			//return room name as part of this list
+			.each(([err, result], index) => {
+				const roomExists = isNumeric(result)
+				const roomArr = roomList[index]
+				const [type, room] = roomArr
+				if(roomExists){
+					return subList.push(roomArr)
+				} else {
+					setupList.push(roomArr)
+					return shared.setupRoom(sessionId, room, type, multi)
+				}
+			})
+			.then(() => {
+				if(setupList.length > 0){
+					return multi.exec()
+				} else {
+					multi.discard()
+					return []
+				}
+			})
+			.each(([err, setupResult], index) => {
+				_error('n setup', err, setupResult, setupList[index]);
+				//verify the result
+				if(err || !setupResult){ return false }
+				subList.push(setupList[index])
+			})
+			.tapCatch((err)=> { _error('error on setup', err); multi.discard()})
+			.then(() => {
+				return [sessionId, subList]
+			})
 	})
 
 }
@@ -632,6 +652,7 @@ shared.setupOnSubscribeJob = (sessionId, room, type) => {
 	.then(function(result) {
 		return result
 	})
+	.tapCatch(_error)
 }
 
 shared.getReservationCount = (roomName) => {
@@ -643,6 +664,8 @@ shared.getReservationCount = (roomName) => {
 		numReservations = result //store result so we can nil
 		return numReservations
 	})
+	.tapCatch(_error)
+
 }
 
 shared.unSubFromRooms = ([sessionId, roomList, removeEmptyRooms = true]) => {
@@ -709,6 +732,7 @@ shared.setupOnUnSubscribeJob = (sessionId, room, type) => {
 		.then(function(result) {
 			return result
 		})
+		.tapCatch(_error)
 }
 
 /**
@@ -716,58 +740,60 @@ shared.setupOnUnSubscribeJob = (sessionId, room, type) => {
  * @param creator
  * @param type
  * @param room
- * @param client default client or multi client
+ * @param redisClient default client or multi client
  * @returns {Promise}
  */
 shared.setupRoom = (creator = "server", room, type, redisClient = client) => {
 
-    let roomArr = helper._roomNameToArr(room)
-    let roomArrStr = JSON.stringify(roomArr)
+    let roomArr 			= helper._roomNameToArr(room)
+    let roomArrStr 			= JSON.stringify(roomArr)
     let maxObservers 		= shared.getMaxObservers(roomArr)
     let isBotEnabledRoom 	= shared.getBotsEnabledInRoom(roomArr)
     let maxSubscriptions 	= shared.getMaxSubscriptions(roomArr)
 
-    return Promise.resolve().then(() => {
-        switch (type) {
-            case SYSTEM_ROOM_TYPE:
-            	_log('max users for system room', maxSubscriptions)
-                return redisClient.setupSystemRoom(creator, room, Date.now(), isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-            case STANDARD_ROOM_TYPE:
+	return Promise.resolve().then(() => {
+		switch (type) {
+			case SYSTEM_ROOM_TYPE:
+				_log('max users for system room', maxSubscriptions)
+				return redisClient.setupSystemRoom(creator, room, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+			case STANDARD_ROOM_TYPE:
 				_log('max users for std room', maxSubscriptions)
-				return redisClient.setupStandardRoom(creator, room, Date.now(), isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-            case REALTIME_ROOM_TYPE:
-                return redisClient.setupRealTimeGameRoom(creator, room, roomArrStr, Date.now(), isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-            case TURNBASED_ROOM_TYPE:
-                return redisClient.setupTurnBasedGameRoom(creator, room, roomArrStr, Date.now(), isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-            default:
-                _log('no type defined for setup', type, room)
-                throw new Error('No room type was found or defined')
-        }
-   })
+				return redisClient.setupStandardRoom(creator, room, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+			case REALTIME_ROOM_TYPE:
+				return redisClient.setupRealTimeGameRoom(creator, room, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+			case TURNBASED_ROOM_TYPE:
+				return redisClient.setupTurnBasedGameRoom(creator, room, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+			default:
+				_log('no type defined for setup', type, room)
+				throw new Error('No room type was found or defined')
+		}
+	})
 }
 
 shared.subToRoom = (sessionId, roomName, type, appendResponse = {}, redisClient=client) => {
     const roomType = type ? type: shared.getRoomTypeFromDb(roomName)
     const roomArr = JSON.stringify(helper._roomNameToArr(roomName))
-    return Promise.resolve()
+	return Promise.resolve()
         .then(() => {
-            let strAppendResponse = JSON.stringify(appendResponse)
+			const serverTime = globals.getVariable("SERVER_TIME")
+			let strAppendResponse = JSON.stringify(appendResponse)
 
             switch (roomType) {
                 case SYSTEM_ROOM_TYPE:
-                    return redisClient.subSystemRoom(sessionId, roomName, Date.now(), strAppendResponse)
+                    return redisClient.subSystemRoom(sessionId, roomName, serverTime, strAppendResponse)
                 case STANDARD_ROOM_TYPE:
-                    return redisClient.subStandardRoom(sessionId, roomName, Date.now(), strAppendResponse)
+                    return redisClient.subStandardRoom(sessionId, roomName, serverTime, strAppendResponse)
                 case REALTIME_ROOM_TYPE:
-                    return redisClient.subRealTimeGameRoom(sessionId, roomName, roomArr, Date.now(), strAppendResponse)
+                    return redisClient.subRealTimeGameRoom(sessionId, roomName, roomArr, serverTime, strAppendResponse)
                 case TURNBASED_ROOM_TYPE:
-                    return redisClient.subTurnBasedGameRoom(sessionId, roomName, roomArr, Date.now(), strAppendResponse)
+                    return redisClient.subTurnBasedGameRoom(sessionId, roomName, roomArr, serverTime, strAppendResponse)
                 default:
                     _log('no type defined', roomType)
                     throw new Error('No room type was found or defined')
                     break
             }
-        })
+        }).tapCatch(_error)
+
 }
 
 shared.unsubToRoom = (sessionId, roomName, type, appendResponse = {}, redisClient=client) => {
@@ -779,15 +805,16 @@ shared.unsubToRoom = (sessionId, roomName, type, appendResponse = {}, redisClien
 
 	return Promise.props({sessionId, roomName, roomType, roomArr, strAppendResponse})
         .then((props) => {
-            switch (props.roomType) {
+			const serverTime = globals.getVariable("SERVER_TIME")
+			switch (props.roomType) {
                 case SYSTEM_ROOM_TYPE:
-                    return redisClient.unsubSystemRoom(props.sessionId, props.roomName, Date.now(), props.strAppendResponse)
+                    return redisClient.unsubSystemRoom(props.sessionId, props.roomName, serverTime, props.strAppendResponse)
                 case STANDARD_ROOM_TYPE:
-                    return redisClient.unsubStandardRoom(props.sessionId, props.roomName, Date.now(), props.strAppendResponse)
+                    return redisClient.unsubStandardRoom(props.sessionId, props.roomName, serverTime, props.strAppendResponse)
                 case REALTIME_ROOM_TYPE:
-                    return redisClient.unsubRealTimeGameRoom(props.sessionId, props.roomName, props.roomArr, Date.now(), props.strAppendResponse)
+                    return redisClient.unsubRealTimeGameRoom(props.sessionId, props.roomName, props.roomArr, serverTime, props.strAppendResponse)
                 case TURNBASED_ROOM_TYPE:
-                    return redisClient.unsubTurnBasedGameRoom(props.sessionId, props.roomName, props.roomArr, Date.now(), props.strAppendResponse)
+                    return redisClient.unsubTurnBasedGameRoom(props.sessionId, props.roomName, props.roomArr, serverTime, props.strAppendResponse)
                 default:
                     throw new Error('[Unsub]: No room type was found or defined')
             }
@@ -821,23 +848,26 @@ shared.findAndDestroyRoom = (roomName, redisClient=client) => {
 
 shared.destroyRoom = (type, roomName, redisClient=client) => {
     let roomArr = JSON.stringify(helper._roomNameToArr(roomName))
-    return Promise.resolve()
+
+	return Promise.resolve()
 		.then(() => {
+			const serverTime = globals.getVariable("SERVER_TIME")
 			_log('destroy room status: ', type, roomName)
 			switch (type) {
 				case SYSTEM_ROOM_TYPE:
-					return redisClient.destroySystemRoom(roomName, Date.now())
+					return redisClient.destroySystemRoom(roomName, serverTime)
 				case STANDARD_ROOM_TYPE:
-					return redisClient.destroyStandardRoom(roomName, Date.now())
+					return redisClient.destroyStandardRoom(roomName, serverTime)
 				case REALTIME_ROOM_TYPE:
-					return redisClient.destroyRealTimeGameRoom(roomName, roomArr, Date.now())
+					return redisClient.destroyRealTimeGameRoom(roomName, roomArr, serverTime)
 				case TURNBASED_ROOM_TYPE:
-					return redisClient.destroyTurnBasedGameRoom(roomName, roomArr, Date.now())
+					return redisClient.destroyTurnBasedGameRoom(roomName, roomArr, serverTime)
 				default:
 					throw new Error('[Destroy]: No room type was found or defined')
 					break
 			}
-   })
+   }).tapCatch(_error)
+
 }
 
 //Queue cleanup scripts
@@ -855,6 +885,7 @@ shared.removePlayerOnSubOrUnSubNotifications = (roomName) =>{
 //Custom redis command but in node
 shared.commandPublishGameRoomUpdate = (roomName, roomType) => {
 	const roomInfoKey = helper._bar('rooms', roomName, 'info')
+
 	return Promise.props({
 		phase: "roomUpdate",
 		room: roomName,
@@ -866,14 +897,15 @@ shared.commandPublishGameRoomUpdate = (roomName, roomType) => {
 	})
 	.then((dataToSend) => {
 		let message = JSON.stringify(dataToSend)
-		return client.publishToRoom(roomName, Date.now(), message)
+		return client.publishToRoom(roomName, message)
 	})
+	.tapCatch(_error)
 }
 
 shared.commandPublishGameRoomLobbyUpdate = (roomPath, roomName) => {
-    return shared.getThemeCounts(roomPath, roomName)
+	return shared.getThemeCounts(roomPath, roomName)
         .then((playersData) => {
-            let dataToSend = {
+			let dataToSend = {
                 phase: "roomUpdate",
                 room: roomName,
                 response: {
@@ -883,8 +915,9 @@ shared.commandPublishGameRoomLobbyUpdate = (roomPath, roomName) => {
                 }
             }
             let message = JSON.stringify(dataToSend)
-            return client.publishToRoom(roomName, Date.now(), message)
+            return client.publishToRoom(roomName, message)
         })
+		.tapCatch(_error)
 }
 
 shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
@@ -911,7 +944,9 @@ shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
 			.then((nestedJob) => nestedJob.finished())
 			.then((result) =>{
 				return [sessionId, roomList]
-			}).catch((err)=> {
+			})
+			.tapCatch(_error)
+			.catch((err)=> {
 				if(err.message === "no game room"){
 					return [sessionId, roomList]
 				}
@@ -923,17 +958,17 @@ shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
 
 
 shared.commandRoomTick = (job) => {
-	//return new Promise((resolve, reject) => {
 
 		const checkExpires = () => {
+			const serverTime = globals.getVariable("SERVER_TIME")
 
-			_log('check expiresss')
+			_log('check expiresss', serverTime)
 
 			const expiredTime = 60000 //60 sec expiration without an update
 			let roomList = []
 			let multi
 			//move expired ones to another table for processing
-			return client.zrangebyscore('tick|rooms', '(0', Date.now()-expiredTime, 'LIMIT', 0, 25)
+			return client.zrangebyscore('tick|rooms', '(0', serverTime-expiredTime, 'LIMIT', 0, 25)
 				.tap((rooms)=> {
 					_log('rooms found', rooms)
 					multi = client.multi()
@@ -998,37 +1033,31 @@ shared.commandRoomTick = (job) => {
 
 		const checkRoomStates = () => {
 			_log('check expi1resss')
+			const serverTime = globals.getVariable("SERVER_TIME")
 
-			const expiredTime = 5000 //60 sec expiration without an update
 			let roomList = []
-			let multi
-			return client.zrangebyscore('tick|rooms', '(0', Date.now()-5000, 'LIMIT', 0, 25)
+			return client.zrangebyscore('tick|rooms', '(0', serverTime-2000, 'LIMIT', 0, 25)
 				.tap((rooms)=> {
 					_log('rooms found', rooms)
-					multi = client.multi()
 				})
 				.each((roomName) => {
 					const roomInfoKey = helper._bar('rooms', roomName, 'info')
 					return client.hmget(roomInfoKey, 'gameState', 'subscribers').then(([gameState,subscribers]) => {
 						if(gameState){
 							roomList.push(roomName, gameState)
+							const newExpire = serverTime+5000
+							const newTime = serverTime
 
 							if(gameState === 'CREATED' && parseInt(subscribers) > 1){
-								_log('subs', subscribers)
-								return client.hset(roomInfoKey,'gameState', 'ACTIVE')
+
+								return client.setGameActive(roomName, newTime)
+
 							} else if(gameState === 'ACTIVE' && parseInt(subscribers) > 1){
-								//check last turn parameter, check against expiration time for user, and switch user if needed
-								return client.hget(roomInfoKey,'turnSeatCurrent', 'turnExpireAt','turnSeatNext').then(([current, expiration, next]) => {
-									if(expiration >= Date.now()){
-										//use a getset to get last 
-										return client.hset(roomInfoKey, 'turnSeatCurrent', next)
-									} else if(current === 5){
-										return client.hset('gameState', 'COMPLETE')
-									}
-								})
-								//return client.hget(roomInfoKey,'turnExpireAt', )
-								//return client.hget(roomInfoKey,'turnSeatNext', )
+								return client.checkCurrentTurn(roomName, newTime)
+									.tap(_error).then((result) => result === "EXPIRED" ? client.setNextTurn(roomName, newTime) : result)
 							}
+						} else {
+							return 'OK'
 						}
 					})
 				})
@@ -1036,7 +1065,7 @@ shared.commandRoomTick = (job) => {
 
 				})
 				.then((result) => {
-					_log('whats state', roomList)
+					_log('whats state', roomList, result)
 					return roomList
 				})
 				.tapCatch((err) => {
@@ -1080,11 +1109,7 @@ shared.commandRoomTick = (job) => {
             })*/
 		}
 
-
-		return Promise.props([checkExpires(),checkRoomStates(),checkRoomUpdates()])
-	//})
-
-
+		return Promise.all([checkExpires(),checkRoomStates(),checkRoomUpdates()])
 /*
 
 
@@ -1116,14 +1141,15 @@ shared.commandRoomTick = (job) => {
 }
 
 shared.commandUnSubSession = (sessionId, destroyType) => {
-
 	return shared.getSubscriptionsBySessionId([sessionId])
 		.then((roomList) => shared.unSubFromRooms([sessionId, roomList]))
-		.then(() => client.destroySession(sessionId, Date.now(), destroyType))
+		.then(() => client.destroySession(sessionId, destroyType))
+		.tapCatch(_error)
+
 }
 
 client.defineCommand('destroySession', {
-	numberOfKeys: 2,
+	numberOfKeys: 1,
 	lua: fs.readFileSync("./scripts/redis/destroySession.lua", "utf8")
 })
 
@@ -1144,7 +1170,7 @@ client.defineCommand('sendChatToRoom', {
 
 //System Reserved Rooms (type -1)
 client.defineCommand('setupSystemRoom', {
-    numberOfKeys: 5,
+    numberOfKeys: 4,
     lua: fs.readFileSync("./scripts/redis/setupSystemRoom.lua", "utf8")
 })
 client.defineCommand('subSystemRoom', {
@@ -1162,7 +1188,7 @@ client.defineCommand('destroySystemRoom', {
 
 //Standard Rooms (type 0)
 client.defineCommand('setupStandardRoom', {
-    numberOfKeys: 5,
+    numberOfKeys: 4,
     lua: fs.readFileSync("./scripts/redis/setupStandardRoom.lua", "utf8")
 })
 client.defineCommand('subStandardRoom', {
@@ -1180,7 +1206,7 @@ client.defineCommand('destroyStandardRoom', {
 
 //Real time rooms (type 1)
 client.defineCommand('setupRealTimeGameRoom', {
-    numberOfKeys: 6,
+    numberOfKeys: 5,
     lua: fs.readFileSync("./scripts/redis/setupRealTimeGameRoom.lua", "utf8")
 })
 client.defineCommand('subRealTimeGameRoom', {
@@ -1198,7 +1224,7 @@ client.defineCommand('destroyRealTimeGameRoom', {
 
 //Turn based rooms (type 2)
 client.defineCommand('setupTurnBasedGameRoom', {
-    numberOfKeys: 6,
+    numberOfKeys: 5,
     lua: fs.readFileSync("./scripts/redis/setupTurnBasedGameRoom.lua", "utf8")
 })
 client.defineCommand('subTurnBasedGameRoom', {
@@ -1213,5 +1239,16 @@ client.defineCommand('destroyTurnBasedGameRoom', {
     numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/destroyTurnBasedGameRoom.lua", "utf8")
 })
-
+client.defineCommand('setGameActive', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/turnbased/setGameActive.lua", "utf8")
+})
+client.defineCommand('checkCurrentTurn', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/turnbased/checkCurrentTurn.lua", "utf8")
+})
+client.defineCommand('setNextTurn', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/turnbased/setNextTurn.lua", "utf8")
+})
 module.exports = shared

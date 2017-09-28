@@ -47,8 +47,20 @@ local rk = {
     roomHistory             = "rooms|"..KEYS[1].."|history",
     roomMessages            = "rooms|"..KEYS[1].."|messages",
     roomReserves            = "rooms|"..KEYS[1].."|reserves",
-    roomBots	            = "rooms|"..KEYS[1].."|bots"
+    roomBots	            = "rooms|"..KEYS[1].."|bots",
+    roomOptIns	            = "rooms|"..KEYS[1].."|optIns:",
+    roomPlayers	            = "rooms|"..KEYS[1].."|players:"
 }
+
+--set a destroying flag to true
+redis.call('hset', rk.roomInfo, 'destroying', 1)
+
+--get current player/optIn gameId
+local nextGameId = redis.call('hget', rk.roomInfo, 'gameId')
+local gameId = nextGameId and nextGameId - 1
+
+--remove optIns and players from current game Id and next game id
+redis.call('del', rk.roomOptIns..nextGameId, rk.roomPlayers..nextGameId, rk.roomOptIns..gameId, rk.roomPlayers..gameId)
 
 --gather all sessions in the room
 local sessions 	= hexSearchSubject('hex|sessions:rooms','is-sub-of',clientRoomName)
@@ -131,7 +143,7 @@ end
 redis.call('zrem',rk.tickRooms,clientRoomName)
 
 --remove the room, info, history, and messages
-redis.call('del', rk.roomName, rk.roomInfo, rk.roomHistory, rk.roomMessages, rk.roomBots, rk.roomReserves)
+redis.call('del', rk.roomName, rk.roomInfo, rk.roomHistory, rk.roomMessages, rk.roomBots, rk.roomReserves, rk.roomOptIns, rk.roomPlayers)
 
 --remove hexastores associating room properties
 redis.call('zrem', 'hex|rooms:properties', createHexastore(clientRoomName, 'is-room-type', roomType))

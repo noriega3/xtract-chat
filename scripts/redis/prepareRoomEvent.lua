@@ -14,7 +14,11 @@ local userId                = redis.call('hget', rk.session, 'userId')
 local clientRoomName        = KEYS[2]
 local eventId               = KEYS[3]
 local eventName             = KEYS[4]
-local currentTime           = KEYS[5]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 local eventResponse         = ARGV[1]
 local verifyPhaseName       = ARGV[2] or "sendRoomEvent"
 local verifiedPhaseName     = ARGV[3] or "receiveRoomEvent"

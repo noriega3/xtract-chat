@@ -28,10 +28,14 @@ local roomType = 2
 local sessionId = KEYS[1]
 local clientRoomName = KEYS[2]
 local roomArr = cjson.decode(KEYS[3])
-local currentTime = KEYS[4]
-local updateTime = KEYS[4]+45000
-local isBotsEnabled = _tonumber(KEYS[5])
-local maxSubscribers = KEYS[6]
+local currentTime           = redis.call('get', 'serverTime')
+
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
+local updateTime = currentTime+45000
+local isBotsEnabled = _tonumber(KEYS[4])
+local maxSubscribers = KEYS[5]
 local maxObservers
 
 local rk = {
@@ -56,7 +60,7 @@ if(maxSubscribers == "LIMIT") then
 end
 
 --update session or return error when doesnt exist
-if(redis.call('zadd', rk.tickSessions, 'XX', 'CH', currentTime, sessionId) == 0) then
+if(redis.call('zadd', rk.tickSessions, 'XX', 'CH', 'INCR', currentTime, sessionId) == 0) then
 	return redis.error_reply('no session')
 end
 
@@ -104,7 +108,10 @@ if(not doesRoomExist) then
 	--turn based
 	'gameHash', _mathrandom(currentTime, updateTime), --turn (unique hash to use for game data like a deck)
 	'gameState', "CREATED", -- turn (AUTO_MATCHING, ACTIVE, COMPLETE, CANCELLED, EXPIRED)
-	'gamesCompleted', 0 -- turn
+	'gamesCompleted', 0, -- turn
+	'gameId', 0, -- turn
+	'turnSeatIndex', 0, -- turn
+	'turnExpireAt', 0 -- turn
 	)
 
 	--Add empty rows for each available seat in room or set them to seat reserved
