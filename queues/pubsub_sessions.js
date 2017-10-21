@@ -18,9 +18,9 @@ const _log 		= debug("sessionQ"+ (cluster.isWorker ? ":"+cluster.worker.id : "")
 const _error 	= debug("error"+ (cluster.isWorker ? ":"+cluster.worker.id : ""))
 
 const addConfig = {
-    attempts: 3,
+    attempts: 1,
     removeOnComplete: true,
-	timeout: 10000,
+	//timeout: 10000,
 	backoff: {
     	type: 'fixed',
 		delay: 500
@@ -56,44 +56,55 @@ sessionQueue.process('init',(job) => {
 	const serverTime = globals.getVariable('SERVER_TIME')
 
     //adds playerData to the new object to be set in session:*id*
-    let sessionData = Object.assign({ sessionId:sessionId, online: 1, created: _getTime() }, playerData)
+    let sessionData = Object.assign({ sessionId:sessionId, online: 1, created: serverTime }, playerData)
     let objSessionData = helper._convertObjectToArray(sessionData)
     let roomList
-
+	job.progress(25)
 
 	_log('INIT SERVER TIME', serverTime)
 
     return client.initSession(sessionId, objSessionData)
-        .then((rooms) => {
-            roomList = helper._arrToSet(rooms)
+		.tap((result) => _log('[INIT] Setup', result.toString()))
+
+		.then((rooms) => {
+			job.progress(50)
+			roomList = helper._arrToSet(rooms)
             return roomSubQueue.add('subscribe', {
                 sessionId: sessionId,
                 rooms: roomList,
                 userId: userId,
                 appName: appName,
-            }, addConfig)
-
+            }, {...addConfig})
 		})
 		.then((nestedJob) => nestedJob.finished())
-		.then((nestedJobResults) => {
-    	_log('nested Job Results', nestedJobResults)
-            let rooms = helper._remapToObject(roomList)
-			//return client.publishToRoom(sessionRoom, Date.now(), JSON.stringify(dataToSend))
-            return roomSubQueue.add('publish', {
-				message: {
-					phase: "init",
-					room: sessionRoom,
-					response: {
-						eventId: sessionId,
-						sessionId: sessionId,
-						userId: userId,
-						appName: appName,
-						rooms: rooms
-					}
+		.tap((result) => _log('[INIT] Sub Job', result.toString()))
+
+		.then(() => {
+			job.progress(75)
+			const rooms = helper._remapToObject(roomList)
+			const message = JSON.stringify({
+				phase: "init",
+				room: sessionRoom,
+				response: {
+					eventId: sessionId,
+					sessionId: sessionId,
+					userId: userId,
+					appName: appName,
+					rooms: rooms
 				}
-			},{...addConfig})
-        }).tapCatch((err) => {
-			_log('err with init', err)
+			})
+			return client.publishToSession(sessionId, message)
+		})
+		.tap((result) => _log('[INIT] Publish', result.toString()))
+
+		.then(() => 'OK')
+
+		.tapCatch(()=>roomActions.commandUnSubSession(sessionId, 'error'))
+		.catch((err) => {
+			_error('[ERROR INIT]' + err.status, err.message)
+			console.log(err, err.stack.split("\n"))
+
+			throw new Error('Init Error '+ err.toString())
 		})
 })
 
@@ -188,6 +199,12 @@ sessionQueue.isReady().then(() => {
 	roomActions.updateServerTime()
 	//sessionQueue.add('expireCheck', {}, {repeat: { cron: '*/5 * * * * *'}, removeOnComplete: true})
 })
+
+client.defineCommand('publishToSession', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/session/publishToSession.lua", "utf8")
+})
+
 
 client.defineCommand('validateAuths', {
     numberOfKeys: 1,

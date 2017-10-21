@@ -1,3 +1,4 @@
+
 const debug         = require('debug') //https://github.com/visionmedia/debug
 const Promise       = require('bluebird')
 const _log          = debug('redis_ps_bridge')
@@ -14,11 +15,12 @@ const Subscriber    = redisManager.subscriber
 Subscriber.psubscribe('sessions|*','rooms|*','bot|*')
 Subscriber.on('pmessage', (pattern, channel, message) => {
 
-    if(pattern === 'rooms|*'){
+	const parsed = message && helper._isJson(message) ? JSON.parse(message) : {}
+
+
+	if(pattern === 'rooms|*'){
 
 		_log('json roomms', message)
-
-		const parsed = JSON.parse(message)
 
         if(helper._isObject(parsed) && parsed.sessionIds && parsed.sessionIds.length > 0) {
 			const sessionIds = parsed.sessionIds
@@ -90,9 +92,8 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
     if(pattern === 'sessions|*'){
 		_log('json sessions', message)
 
-        const parsed = JSON.parse(message)
 
-        if(helper._isObject(parsed) && parsed.sessionId) {
+		if(helper._isObject(parsed) && parsed.sessionId) {
             const sessionId = parsed.sessionId
             const parsedMsg = parsed.message
 
@@ -129,7 +130,6 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 
 		_log('json bot', message)
 
-		const parsed = JSON.parse(message)
 
 		if(helper._isObject(parsed) && parsed.sessionId) {
 			const sessionId = parsed.sessionId

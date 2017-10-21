@@ -42,16 +42,18 @@ const isString = (n) => typeof n === 'string' || n instanceof String
  * Get Timestamp from redis so syncs across all node servers
  */
 shared.updateServerTime = () => {
-	let serverTime = false
-	return client.incrServerTick(1)
-		.then((newServerTime) => {
-			_log(newServerTime)
-			serverTime = newServerTime
-			globals.setVariable("SERVER_TIME", parseInt(serverTime))
-			_log('[Server Time]:', serverTime)
+	let serverTime = Date.now()
+	return client.set('serverTime', serverTime)
+		.then(() => {
+			globals.setVariable("SERVER_TIME", serverTime)
+			_log('[Server Time]:', serverTime, Date.now())
 			return serverTime
 		})
 		.tapCatch((err) => _error('error @ serverTime', err))
+}
+
+shared.getTime = () => {
+	return Date.now()
 }
 
 shared.getRoomTypeFromDb = (room) => {
@@ -77,24 +79,15 @@ shared.getGameRoomBySessionId = (sessionId) => {
 }
 
 shared.checkSessionState = (sessionId, overwriteState) => {
+	return client.checkSessionState(sessionId, overwriteState)
+/*
 	let state = false //ensure that this doesn't cache
 	return Promise.try(function(){ //can't use es6 for this
 		const sessionKey = helper._bar('sessions', sessionId)
 
 		//ping the db
-		return client.hget(sessionKey, 'online')
 
-	}).then(function(newState){
-		_log('state is', newState)
-		state = newState
-		state = overwriteState ? overwriteState.toString() : state
-
-		//check if valid state
-		if(!state || !isNumeric(state) || parseInt(state) !== 1) throw new Error("SESSION OFFLINE")
-
-		//return state
-		return state
-	})
+	})*/
 }
 
 shared.getSubscriptionsBySessionId = ([sessionId]) => {
@@ -269,34 +262,55 @@ shared.getSubscriptionsByRoom = ([roomName]) => {
     })
 }
 
-shared.filterMultipleGameRooms = ([sessionId, roomList]) => {
-	let hasGameRoom
+shared.filterMultipleGameRooms = ([sessionId, roomList, intendedGameRoom]) => {
+	let hasGameRoom = false
+
+	//ensure that the latest game room called upon is saved
 	//reverse the array to ensure the latest gameroom is used
 	const revRoomList = roomList.reverse()
-	return Promise.filter(revRoomList, ([type,_]) => {
+	return Promise.filter(revRoomList, ([type,room]) => {
 
 		if(isGameRoom(type)){
-			if(!hasGameRoom) {
+			if(intendedGameRoom === room) {
 				hasGameRoom = true
-				return true
+				return client.setGameRoomIntent(sessionId, intendedGameRoom).return(true).catch((err) => false)
 			}
 			return false //remove duplicate game rooms
 		}
 		return true
-	}).then((filteredRoomList) =>
-		//reverse back
-		[sessionId, filteredRoomList.reverse()]
-	)
+	}).then((filteredRoomList) => {
+
+		if(intendedGameRoom){
+			return client.filterMultipleGameRooms(sessionId)
+				.tap((rooms) => _log('[Filter Result]', rooms))
+				.then((rooms) => {
+					if (rooms && rooms.length > 0) {
+						return roomSubQueue.add('unsubscribe', {sessionId: sessionId,rooms: rooms}, {...addConfig})
+							.then((nestedJob) => nestedJob.finished())
+							.tap((nestR) => _log('nestres', nestR))
+							.then((nestResult) => [sessionId, filteredRoomList.reverse()])
+					} else {
+						return Promise.resolve([sessionId, filteredRoomList.reverse()])
+					}
+				})
+
+		} else {
+			_log('using filter', filteredRoomList.reverse())
+			//reverse back
+			return Promise.resolve([sessionId, filteredRoomList.reverse()])
+		}
+	})
 }
 
 shared.filterReservations = ([sessionId, roomList]) => {
 	return Promise.filter(roomList, ([type,room]) => {
 
+		_log('filtering', type, room)
 		//Check if valid room and type
 		if(!(isNumeric(type)) || !room) return false //remove from array
 
 		const reservesKey = helper._bar('rooms',room, 'reserves')
-		const serverTime = globals.getVariable("SERVER_TIME")
+		const serverTime = Date.now()
 
 		switch (type) {
 			case SYSTEM_ROOM_TYPE:
@@ -305,12 +319,21 @@ shared.filterReservations = ([sessionId, roomList]) => {
 			case REALTIME_ROOM_TYPE:
 			case TURNBASED_ROOM_TYPE:
 				//keep in array
-				return client.zscore(reservesKey, sessionId).then((timeExpired) => isNumeric(timeExpired) ? timeExpired > serverTime : false)
+
+				return client.checkRoomReservation(sessionId, room).then((status) => {
+					_log('status', status)
+					return status === 'OK'
+				}).catch((err) => {
+					_log('err reserve', err.status, err.message)
+					return false
+				})
+				//return client.zscore(reservesKey, sessionId).then((timeExpired) => isNumeric(timeExpired) ? timeExpired > serverTime : false)
 			default:
 				return false //remove from array
 		}
 	})
-	.then((filteredRoomList) => [sessionId, filteredRoomList])
+	.tap((filtered) => _log('filter result', [sessionId, filtered]))
+	.then((filtered) => [sessionId, filtered])
 }
 
 shared.filterExistingSubs = ([sessionId, roomList])  => {
@@ -330,6 +353,7 @@ shared.filterExistingSubs = ([sessionId, roomList])  => {
 shared.checkNonExistingSubsAndType = ([sessionId, roomList, removeEmptyRooms])  => {
 	//uses the array from the db, as it has the type already defined.
 	return shared.getSubscriptionsBySessionId([sessionId])
+		.tap((rooms) => _log('subs of session return', rooms,'|', roomList))
 		.filter(([roomType, roomName]) => roomList.includes(roomName))
 		.then((filteredList) => [sessionId, filteredList, removeEmptyRooms])
 }
@@ -554,7 +578,7 @@ shared.setupRooms = ([sessionId, roomList]) => {
 
 		return multi.exec()
 			.tap(([err, result]) => {
-				_error('setup results', err, result);
+				_error('setup results', err, result, roomList, sessionId);
 				multi = client.multi()
 			})
 			//return room name as part of this list
@@ -592,10 +616,9 @@ shared.setupRooms = ([sessionId, roomList]) => {
 }
 
 shared.subToRooms = ([sessionId, roomList]) => {
+	if(roomList.length <= 0) return Promise.resolve([sessionId, []])
 	let multi = client.multi()
 	let subList = []
-
-	if(roomList.length <= 0) return Promise.resolve([sessionId, []])
 
 	for (let [_, room] of roomList) {
 		multi.zscore('tick|rooms', room)
@@ -607,6 +630,7 @@ shared.subToRooms = ([sessionId, roomList]) => {
 	//TODO: add expire check
 		.each(([err, result], index) => {
 			const roomExists = isNumeric(result) ? roomList[index] : null
+
 			const roomArr = roomList[index]
 			const [type, room, params] = roomArr
 			if(roomExists) {
@@ -614,8 +638,8 @@ shared.subToRooms = ([sessionId, roomList]) => {
 				return shared.subToRoom(sessionId, room, type, params, multi)
 			}
 		})
-		.then(() => {
-			if(subList.length > 0){
+		.then((results) => {
+			if(results && subList.length > 0){
 				return multi.exec()
 			} else {
 				multi.discard()
@@ -625,34 +649,89 @@ shared.subToRooms = ([sessionId, roomList]) => {
 		.each(([err, subResult], index) => {
 			const roomArr = subList[index]
 			const [type, room] = roomArr
-			return shared.setupOnSubscribeJob(sessionId, room, type)
 
+			if(!err){
+				return shared.setupOnSubscribeJob(sessionId, room, type)
+			} else {
+				_error("[ERROR SUB MULTI] ", err.toString())
+				return shared.unsubToRoom(sessionId, room, type, {})
+			}
 		})
-		.tapCatch(_error)
 		.tapCatch(() => multi.discard())
 		//todo: add filter
 		.then(() => {
+			//log finished subbing and sending jobs.
 			return [sessionId, subList]
 		})
 }
 
+shared.unSubFromRooms = ([sessionId, roomList, removeEmptyRooms = true]) => {
+	if(roomList.length <= 0) return Promise.resolve([sessionId, [], removeEmptyRooms])
+	let multi = client.multi()
+	let destroyList = []
+
+	_error('unsub from room', roomList)
+
+	//for each room passed in, add it to the multi
+	return Promise.each(roomList, ([type,room]) => shared.unsubToRoom(sessionId, room, type, {}, multi))
+		//execute the unsub
+		.then(() => multi.exec())
+		.tap((results) => {
+			_log("[UNSUB ROOMS] unsub counts", results)
+			multi = client.multi()
+		})
+		//for each room, check counts and process the handler onUnsubscribe
+		.each(([err, unSubResult], index) => {
+			const [type, room] = roomList[index]
+
+			if(!err){
+				if(unSubResult > 0){
+					return shared.setupOnUnSubscribeJob(sessionId, room, type)
+				} else {
+					return shared.getReservationCount(room)
+						.then((numReserves) => {
+							//if no reserves, destroy it.
+							if(numReserves <= 0 && removeEmptyRooms){
+								destroyList.push(roomList[index])
+								return shared.destroyRoom(type, room, multi)
+							}
+							return 'EMPTY SKIP DESTROY'
+						})
+				}
+			} else {
+				_error("[ERROR UNSUB MULTI] ", err.toString())
+				return shared.unsubToRoom(sessionId, room, type, {}) //we'll try again but without using multi
+			}
+		})
+		.then(() => {
+			if(destroyList.length > 0){
+				return multi.exec()
+			} else {
+				multi.discard()
+				return [sessionId, roomList, removeEmptyRooms]
+			}
+		})
+		.tapCatch((err)=> {
+			_error('unsub error', err.toString())
+			multi.discard()
+		})
+		.tap((result) => {_log('[UNSUB MULTI] destroy result', result)})
+		.then(() => [sessionId, roomList, removeEmptyRooms])
+
+}
 shared.setupOnSubscribeJob = (sessionId, room, type) => {
 	const jobId = helper._colon('onPlayerSubscribe', room)
 	return Promise.props({
-		id: jobId,
+		//id: jobId,
 		sessionId: sessionId,
 		roomName: room,
 		roomType: type,
 		bot: shared.checkIfBot(sessionId)
 	})
 	.then(function(dataToSend){
-		return roomSubQueue.add('onPlayerSubscribe', dataToSend, {jobId: dataToSend.jobId, ...addConfig})
+		return roomSubQueue.add('onPlayerSubscribe', dataToSend, {jobId: dataToSend.jobId, ...addConfig}).then((nestedJob) => nestedJob.finished())
 	})
-	.then(function(nestedJob){ return nestedJob.finished()})
-	.then(function(result) {
-		return result
-	})
-	.tapCatch(_error)
+	.tapCatch((err) => _error('onsub', err.toString()))
 }
 
 shared.getReservationCount = (roomName) => {
@@ -668,53 +747,7 @@ shared.getReservationCount = (roomName) => {
 
 }
 
-shared.unSubFromRooms = ([sessionId, roomList, removeEmptyRooms = true]) => {
-	let multi = client.multi()
-	let destroyList = []
 
-	if(roomList.length <= 0) return Promise.resolve([sessionId, [], removeEmptyRooms])
-
-
-	return Promise.each(roomList, ([type,room]) =>
-			shared.unsubToRoom(sessionId, room, type, {}, multi)
-		)
-		.tap((list) => { _error('list', list); _error('roomlist', roomList)})
-		.then(() => multi.exec())
-		.tap(() => {multi = client.multi()})
-		.each(([err, unSubResult], index) => {
-
-			const [type, room] = roomList[index]
-
-			if(!err && unSubResult > 0){
-				return shared.setupOnUnSubscribeJob(sessionId, room, type)
-			} else if(!err && unSubResult <= 0 && removeEmptyRooms){
-				return shared.getReservationCount(room)
-					.then((numReserves) => {
-
-						if(numReserves === 0){
-							destroyList.push(roomList[index])
-							return shared.destroyRoom(type, room, multi)
-						}
-					})
-			} else {
-				return 'OK'
-			}
-		})
-		.then(() => {
-			if(destroyList.length > 0){
-				return multi.exec()
-			} else {
-				multi.discard()
-				return []
-			}
-		})
-		.tapCatch(()=> {multi.discard()})
-		.tap((result) => {_error('results', result)})
-		.then((results) => {
-			return [sessionId, roomList, removeEmptyRooms]
-		})
-
-}
 
 shared.setupOnUnSubscribeJob = (sessionId, room, type) => {
 	const jobId = helper._colon('onPlayerUnSubscribe', room)
@@ -738,90 +771,103 @@ shared.setupOnUnSubscribeJob = (sessionId, room, type) => {
 /**
  * Main router function when user wants to join a room
  * @param creator
- * @param type
- * @param room
+ * @param roomName
+ * @param roomType
  * @param redisClient default client or multi client
- * @returns {Promise}
  */
-shared.setupRoom = (creator = "server", room, type, redisClient = client) => {
+shared.setupRoom = (creator = "server", roomName, roomType, redisClient = client) => {
 
-    let roomArr 			= helper._roomNameToArr(room)
+    let roomArr 			= helper._roomNameToArr(roomName)
     let roomArrStr 			= JSON.stringify(roomArr)
     let maxObservers 		= shared.getMaxObservers(roomArr)
     let isBotEnabledRoom 	= shared.getBotsEnabledInRoom(roomArr)
     let maxSubscriptions 	= shared.getMaxSubscriptions(roomArr)
 
-	return Promise.resolve().then(() => {
-		switch (type) {
-			case SYSTEM_ROOM_TYPE:
-				_log('max users for system room', maxSubscriptions)
-				return redisClient.setupSystemRoom(creator, room, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-			case STANDARD_ROOM_TYPE:
-				_log('max users for std room', maxSubscriptions)
-				return redisClient.setupStandardRoom(creator, room, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-			case REALTIME_ROOM_TYPE:
-				return redisClient.setupRealTimeGameRoom(creator, room, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-			case TURNBASED_ROOM_TYPE:
-				return redisClient.setupTurnBasedGameRoom(creator, room, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
-			default:
-				_log('no type defined for setup', type, room)
-				throw new Error('No room type was found or defined')
-		}
-	})
+	return Promise.resolve()
+		.then(() => {
+			switch (roomType) {
+				case SYSTEM_ROOM_TYPE:
+					return redisClient.setupSystemRoom(creator, roomName, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+				case STANDARD_ROOM_TYPE:
+					return redisClient.setupStandardRoom(creator, roomName, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+				case REALTIME_ROOM_TYPE:
+					return redisClient.setupRealTimeGameRoom(creator, roomName, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+				case TURNBASED_ROOM_TYPE:
+					return redisClient.setupTurnBasedGameRoom(creator, roomName, roomArrStr, isBotEnabledRoom, 'LIMIT', maxSubscriptions, maxObservers)
+				default:
+					throw new Error('No room type was found or defined')
+			}
+		}).tapCatch(_error)
 }
 
-shared.subToRoom = (sessionId, roomName, type, appendResponse = {}, redisClient=client) => {
-    const roomType = type ? type: shared.getRoomTypeFromDb(roomName)
+shared.subToRoom = (sessionId, roomName, roomType, appendResponse = {}, redisClient=client) => {
     const roomArr = JSON.stringify(helper._roomNameToArr(roomName))
 	return Promise.resolve()
         .then(() => {
-			const serverTime = globals.getVariable("SERVER_TIME")
 			let strAppendResponse = JSON.stringify(appendResponse)
 
             switch (roomType) {
                 case SYSTEM_ROOM_TYPE:
-                    return redisClient.subSystemRoom(sessionId, roomName, serverTime, strAppendResponse)
+                    return redisClient.subSystemRoom(sessionId, roomName, strAppendResponse)
                 case STANDARD_ROOM_TYPE:
-                    return redisClient.subStandardRoom(sessionId, roomName, serverTime, strAppendResponse)
+                    return redisClient.subStandardRoom(sessionId, roomName, strAppendResponse)
                 case REALTIME_ROOM_TYPE:
-                    return redisClient.subRealTimeGameRoom(sessionId, roomName, roomArr, serverTime, strAppendResponse)
+                    return redisClient.subRealTimeGameRoom(sessionId, roomName, roomArr, strAppendResponse)
                 case TURNBASED_ROOM_TYPE:
-                    return redisClient.subTurnBasedGameRoom(sessionId, roomName, roomArr, serverTime, strAppendResponse)
+                    return redisClient.subTurnBasedGameRoom(sessionId, roomName, roomArr, strAppendResponse)
                 default:
-                    _log('no type defined', roomType)
                     throw new Error('No room type was found or defined')
-                    break
             }
         }).tapCatch(_error)
-
 }
 
-shared.unsubToRoom = (sessionId, roomName, type, appendResponse = {}, redisClient=client) => {
+shared.unsubToRoom = (sessionId, roomName, roomType, appendResponse = {}, redisClient=client) => {
 
-	_log('unsub', sessionId, roomName, type, appendResponse)
-	const roomType = type ? type : shared.getRoomTypeFromDb(roomName)
 	const roomArr = JSON.stringify(helper._roomNameToArr(roomName))
-	const strAppendResponse = JSON.stringify(appendResponse)
 
-	return Promise.props({sessionId, roomName, roomType, roomArr, strAppendResponse})
-        .then((props) => {
-			const serverTime = globals.getVariable("SERVER_TIME")
-			switch (props.roomType) {
+	return Promise.resolve()
+        .then(() => {
+			const strAppendResponse = JSON.stringify(appendResponse)
+			switch (roomType) {
                 case SYSTEM_ROOM_TYPE:
-                    return redisClient.unsubSystemRoom(props.sessionId, props.roomName, serverTime, props.strAppendResponse)
+                    return redisClient.unsubSystemRoom(sessionId, roomName, strAppendResponse)
                 case STANDARD_ROOM_TYPE:
-                    return redisClient.unsubStandardRoom(props.sessionId, props.roomName, serverTime, props.strAppendResponse)
+                    return redisClient.unsubStandardRoom(sessionId, roomName, strAppendResponse)
                 case REALTIME_ROOM_TYPE:
-                    return redisClient.unsubRealTimeGameRoom(props.sessionId, props.roomName, props.roomArr, serverTime, props.strAppendResponse)
+                    return redisClient.unsubRealTimeGameRoom(sessionId, roomName, roomArr, strAppendResponse)
                 case TURNBASED_ROOM_TYPE:
-                    return redisClient.unsubTurnBasedGameRoom(props.sessionId, props.roomName, props.roomArr, serverTime, props.strAppendResponse)
+                    return redisClient.unsubTurnBasedGameRoom(sessionId, roomName, roomArr, strAppendResponse)
                 default:
                     throw new Error('[Unsub]: No room type was found or defined')
             }
 		}).tapCatch(_error)
 }
 
-shared.findAndDestroyRoom = (roomName, redisClient=client) => {
+shared.destroyRoom = (type, roomName, redisClient=client) => {
+    let roomArr = JSON.stringify(helper._roomNameToArr(roomName))
+
+	return Promise.resolve()
+		.then(() => {
+			const serverTime = globals.getVariable("SERVER_TIME")
+			_log('destroy room status: ', type, roomName)
+			switch (type) {
+				case SYSTEM_ROOM_TYPE:
+					return redisClient.destroySystemRoom(roomName)
+				case STANDARD_ROOM_TYPE:
+					return redisClient.destroyStandardRoom(roomName)
+				case REALTIME_ROOM_TYPE:
+					return redisClient.destroyRealTimeGameRoom(roomName,roomArr)
+				case TURNBASED_ROOM_TYPE:
+					return redisClient.destroyTurnBasedGameRoom(roomName,roomArr)
+				default:
+					throw new Error('[Destroy]: No room type was found or defined')
+					break
+			}
+   }).tapCatch(_error)
+
+}
+
+shared.findAndDestroyRoom = (roomName) => {
 	_log('in find destory')
 
 	const roomType = shared.getRoomTypeFromDb(roomName)
@@ -843,31 +889,6 @@ shared.findAndDestroyRoom = (roomName, redisClient=client) => {
 		.then((destroyResults) => {
 			_log('destroy Restrulsts', destroyResults)
 		}).tapCatch(_error)
-}
-
-
-shared.destroyRoom = (type, roomName, redisClient=client) => {
-    let roomArr = JSON.stringify(helper._roomNameToArr(roomName))
-
-	return Promise.resolve()
-		.then(() => {
-			const serverTime = globals.getVariable("SERVER_TIME")
-			_log('destroy room status: ', type, roomName)
-			switch (type) {
-				case SYSTEM_ROOM_TYPE:
-					return redisClient.destroySystemRoom(roomName, serverTime)
-				case STANDARD_ROOM_TYPE:
-					return redisClient.destroyStandardRoom(roomName, serverTime)
-				case REALTIME_ROOM_TYPE:
-					return redisClient.destroyRealTimeGameRoom(roomName, roomArr, serverTime)
-				case TURNBASED_ROOM_TYPE:
-					return redisClient.destroyTurnBasedGameRoom(roomName, roomArr, serverTime)
-				default:
-					throw new Error('[Destroy]: No room type was found or defined')
-					break
-			}
-   }).tapCatch(_error)
-
 }
 
 //Queue cleanup scripts
@@ -922,26 +943,27 @@ shared.commandPublishGameRoomLobbyUpdate = (roomPath, roomName) => {
 
 shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
 
-	let hasGameRoom
+	let hasGameRooms = []
 	for (let [type,room] of roomList) {
-		if(isGameRoom(type) && !hasGameRoom){
-			hasGameRoom = room
+		_log('checking type', sessionId, type, room)
+		if(isGameRoom(type) && !hasGameRooms.includes(room)){
+			hasGameRooms.push(room)
 			break
 		}
-		if(hasGameRoom) break
+		//if(hasGameRoom) break
 	}
 
-	if(hasGameRoom){
-		return shared.getGameRoomBySessionId(sessionId)
-			.then((room) => {
-				if (room && room === hasGameRoom) {
+	if(hasGameRooms.length > 0){
+		return client.getGameRooms(sessionId)
+			.each((room) => {
+				if (hasGameRooms.includes(room)) {
+					_error('has a game room', room)
 					//don't destroy the room as we are reconnecting to it (probably with a different session id)
-					return roomSubQueue.add('unsubscribe', {sessionId: sessionId, roomName: room, removeEmptyRooms: false}, {...addConfig})
+					return roomSubQueue.add('unsubscribe', {sessionId: sessionId, roomName: room, removeEmptyRooms: false}, {...addConfig}).then((nestedJob) => nestedJob.finished())
 				} else {
-					return roomSubQueue.add('unsubscribe', {sessionId: sessionId, roomName: room}, {...addConfig})
+					return roomSubQueue.add('unsubscribe', {sessionId: sessionId, roomName: room}, {...addConfig}).then((nestedJob) => nestedJob.finished())
 				}
 			})
-			.then((nestedJob) => nestedJob.finished())
 			.then((result) =>{
 				return [sessionId, roomList]
 			})
@@ -960,9 +982,8 @@ shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
 shared.commandRoomTick = (job) => {
 
 		const checkExpires = () => {
-			const serverTime = globals.getVariable("SERVER_TIME")
+			const serverTime = Date.now()
 
-			_log('check expiresss', serverTime)
 
 			const expiredTime = 60000 //60 sec expiration without an update
 			let roomList = []
@@ -993,6 +1014,7 @@ shared.commandRoomTick = (job) => {
 				.then((result) => {
 					_log('whats here', result)
 					_log('whats here2', roomList)
+					return result
 				})
 				.tapCatch((err) => {
 					_error('err @ tick', err)
@@ -1032,13 +1054,12 @@ shared.commandRoomTick = (job) => {
 		}
 
 		const checkRoomStates = () => {
-			_log('check expi1resss')
-			const serverTime = globals.getVariable("SERVER_TIME")
+			const serverTime = Date.now()
 
 			let roomList = []
 			return client.zrangebyscore('tick|rooms', '(0', serverTime-2000, 'LIMIT', 0, 25)
 				.tap((rooms)=> {
-					_log('rooms found', rooms)
+					_log('rooms found for state check', rooms)
 				})
 				.each((roomName) => {
 					const roomInfoKey = helper._bar('rooms', roomName, 'info')
@@ -1109,8 +1130,13 @@ shared.commandRoomTick = (job) => {
             })*/
 		}
 
-		return Promise.all([checkExpires(),checkRoomStates(),checkRoomUpdates()])
-/*
+		return Promise.all([checkExpires(),checkRoomStates(),checkRoomUpdates()]).tap((results) => {
+			return results
+		})
+		.tapCatch((err) => {
+			_error('ERROR @ TICK', err.toString())
+		})
+	/*
 
 
 	return client.multi().zrangebyscore('tick|rooms', '(0', Date.now(), 'LIMIT', 0, 10).exec()
@@ -1148,6 +1174,31 @@ shared.commandUnSubSession = (sessionId, destroyType) => {
 
 }
 
+client.defineCommand('checkSessionState', {
+	numberOfKeys: 1,
+	lua: fs.readFileSync("./scripts/redis/session/checkSessionState.lua", "utf8")
+})
+
+client.defineCommand('setGameRoomIntent', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/setGameRoomIntent.lua", "utf8")
+})
+
+client.defineCommand('getGameRooms', {
+	numberOfKeys: 1,
+	lua: fs.readFileSync("./scripts/redis/getSessionGameRooms.lua", "utf8")
+})
+
+client.defineCommand('filterMultipleGameRooms', {
+	numberOfKeys: 1,
+	lua: fs.readFileSync("./scripts/redis/filters/filterMultipleGameRooms.lua", "utf8")
+})
+
+client.defineCommand('checkRoomReservation', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/rooms/checkRoomReservation.lua", "utf8")
+})
+
 client.defineCommand('destroySession', {
 	numberOfKeys: 1,
 	lua: fs.readFileSync("./scripts/redis/destroySession.lua", "utf8")
@@ -1174,11 +1225,11 @@ client.defineCommand('setupSystemRoom', {
     lua: fs.readFileSync("./scripts/redis/setupSystemRoom.lua", "utf8")
 })
 client.defineCommand('subSystemRoom', {
-    numberOfKeys: 3,
+    numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/subSystemRoom.lua", "utf8")
 })
 client.defineCommand('unsubSystemRoom', {
-    numberOfKeys: 3,
+    numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/unsubSystemRoom.lua", "utf8")
 })
 client.defineCommand('destroySystemRoom', {
@@ -1192,11 +1243,11 @@ client.defineCommand('setupStandardRoom', {
     lua: fs.readFileSync("./scripts/redis/setupStandardRoom.lua", "utf8")
 })
 client.defineCommand('subStandardRoom', {
-    numberOfKeys: 3,
+    numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/subStandardRoom.lua", "utf8")
 })
 client.defineCommand('unsubStandardRoom', {
-    numberOfKeys: 3,
+    numberOfKeys: 2,
     lua: fs.readFileSync("./scripts/redis/unsubStandardRoom.lua", "utf8")
 })
 client.defineCommand('destroyStandardRoom', {
@@ -1210,11 +1261,11 @@ client.defineCommand('setupRealTimeGameRoom', {
     lua: fs.readFileSync("./scripts/redis/setupRealTimeGameRoom.lua", "utf8")
 })
 client.defineCommand('subRealTimeGameRoom', {
-    numberOfKeys: 4,
+    numberOfKeys: 3,
     lua: fs.readFileSync("./scripts/redis/subRealTimeGameRoom.lua", "utf8")
 })
 client.defineCommand('unsubRealTimeGameRoom', {
-    numberOfKeys: 4,
+    numberOfKeys: 3,
     lua: fs.readFileSync("./scripts/redis/unsubRealTimeGameRoom.lua", "utf8")
 })
 client.defineCommand('destroyRealTimeGameRoom', {
@@ -1228,11 +1279,11 @@ client.defineCommand('setupTurnBasedGameRoom', {
     lua: fs.readFileSync("./scripts/redis/setupTurnBasedGameRoom.lua", "utf8")
 })
 client.defineCommand('subTurnBasedGameRoom', {
-    numberOfKeys: 4,
+    numberOfKeys: 3,
     lua: fs.readFileSync("./scripts/redis/subTurnBasedGameRoom.lua", "utf8")
 })
 client.defineCommand('unsubTurnBasedGameRoom', {
-    numberOfKeys: 4,
+    numberOfKeys: 3,
     lua: fs.readFileSync("./scripts/redis/unsubTurnBasedGameRoom.lua", "utf8")
 })
 client.defineCommand('destroyTurnBasedGameRoom', {

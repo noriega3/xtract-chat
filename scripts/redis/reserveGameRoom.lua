@@ -54,7 +54,7 @@ local getOpenSeatIndex = function()
 end
 
 local publishConnecting = function(seatIndex)
-	local searchTerm = '[pos||is-sub-of||'..clientRoomName
+	local searchTerm = '[pos||is-sub-of||'..clientRoomName..'||'
 	local response = cjson.decode(ARGV[1])
 	local isReSub = redis.call('zscore', rk.roomName, sessionId) --if user is already in the room, we dont need another userConnecting message
 	local searchResults = redis.call('zrangebylex', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')

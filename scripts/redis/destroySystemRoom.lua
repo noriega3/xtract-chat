@@ -12,7 +12,7 @@ end
 
 local hexSearchSubject = function(redisKey, predicate, object)
 	local searchTerm = '[pos||'..predicate..'||'..object..'||'
-	local results = redis.call('zrangebylex', redisKey, searchTerm, searchTerm..'||\xff')
+	local results = redis.call('zrangebylex', redisKey, searchTerm, searchTerm..'\xff')
 	local response = {}
 	for x = 1,#results do
 		response[#response+1] = results[x]:sub(#searchTerm)
@@ -22,7 +22,7 @@ end
 
 local hexSearchObject = function(redisKey, predicate, subject)
 	local searchTerm = '[pso||'..predicate..'||'..subject..'||'
-	local results = redis.call('zrangebylex', redisKey, searchTerm, searchTerm..'||\xff')
+	local results = redis.call('zrangebylex', redisKey, searchTerm, searchTerm..'\xff')
 	local response = {}
 	for x = 1,#results do
 		response[#response+1] = results[x]:sub(#searchTerm)

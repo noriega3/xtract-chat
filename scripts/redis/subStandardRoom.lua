@@ -9,6 +9,7 @@ local currentTime           = redis.call('get', 'serverTime')
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end
+
 local response              = cjson.decode(ARGV[1])
 local numSubscribers        = 0
 
@@ -55,7 +56,7 @@ local subscribeToRoom = function()
 		--add session to room
 		local memberIndex = redis.call('zrangebylex', rk.roomName, '[open:seat:', '[open:seat:\xff', 'LIMIT', 0, 1)
 		if(not memberIndex or not memberIndex[1]) then return false, 'FULL' end
-		local seat = memberIndex[1]:gsub("open:seat:", "")
+		local seat = memberIndex[1]:gsub("[open:seat:", "")
 		redis.call('zrem', rk.roomName, "open:seat:"..seat)
 		redis.call('zadd', rk.roomName,0, "taken:seat:"..seat..":"..sessionId, 0, "taken:session:"..sessionId..":"..seat)
 		redis.call('zadd', rk.sessionSubs,currentTime,clientRoomName)

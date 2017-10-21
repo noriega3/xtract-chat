@@ -1,15 +1,14 @@
 local _unpack = unpack
 local _stringformat = string.format
 
-local createHexastore = function(subject,predicate,object)
-    return {
+local createHexastore = function(key, subject,predicate,object)
+    return redis.call('zrem', key,
         _stringformat("spo||%s||%s||%s",subject,predicate,object),
         _stringformat("sop||%s||%s||%s",subject,object,predicate),
         _stringformat("osp||%s||%s||%s",object,subject,predicate),
         _stringformat("ops||%s||%s||%s",object,predicate,subject),
         _stringformat("pos||%s||%s||%s",predicate,object,subject),
-        _stringformat("pso||%s||%s||%s",predicate,subject,object)
-    }
+        _stringformat("pso||%s||%s||%s",predicate,subject,object))
 end
 
 local rk = {
@@ -31,7 +30,7 @@ redis.call('hset', rk.session, 'destroying', 1)
 local isBot = redis.call('hexists', rk.session, 'bot') == 1
 local userId = redis.call('hget', rk.session, 'userId')
 if(userId) then
-    redis.call('zrem', 'hex|sessions:users', _unpack(createHexastore(sessionId, 'is-user-id', userId)))
+    createHexastore('hex|sessions:users', sessionId, 'is-user-id', userId)
 end
 
 if(isBot) then

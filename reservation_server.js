@@ -384,5 +384,7 @@ process.on('SIGTERM', _onNodeClose)
  */
 process.on('uncaughtException', (err) => {
 	_log('[Process Error] Uncaught Exception: ', err.toString())
+	console.log(err, err.stack.split("\n"))
+
 	process.exit(1)
 })

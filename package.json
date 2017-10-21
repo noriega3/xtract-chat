@@ -9,19 +9,20 @@
   "author": "Brian Noriega",
   "license": "MIT",
   "devDependencies": {
+    "@types/bull": "^3.0.1",
     "chai": "^4.1.2"
   },
   "dependencies": {
-    "bluebird": "^3.5.0",
-    "body-parser": "^1.17.2",
-    "bull": "^3.1.0",
-    "debug": "^3.0.1",
-    "express": "^4.15.3",
+    "bluebird": "^3.5.1",
+    "body-parser": "^1.18.2",
+    "bull": "^3.3.1",
+    "debug": "^3.1.0",
+    "express": "^4.16.2",
     "express-validator": "^3.2.1",
     "ioredis": "^3.1.4",
-    "node-gcm": "^0.14.6",
-    "request": "^2.81.0",
-    "supports-color": "^4.4.0",
+    "node-gcm": "^0.14.8",
+    "request": "^2.83.0",
+    "supports-color": "^4.5.0",
     "uuid": "^3.1.0"
   },
   "presets": [

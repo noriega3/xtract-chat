@@ -115,6 +115,8 @@ if(not doesRoomExist) then
 end
 
 --update the session who created the room
-redis.call('hset', rk.session,'updated', currentTime)
+if(redis.call('hexists', rk.session, 'updated') == 1) then
+	redis.call('hset', rk.session,'updated', currentTime)
+end
 
 return redis.status_reply('OK')

@@ -9,7 +9,7 @@ local currentTime           = redis.call('get', 'serverTime')
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end
-local response              = cjson.decode(ARGV[1])
+local response              = ARGV[1] and cjson.decode(ARGV[1]) or {}
 local numSubscribers        = 0
 
 local rk = {
@@ -34,14 +34,16 @@ local isBot                 = redis.call('hget', rk.session, 'bot')
 --========================================================================
 
 --create creation string for hexastore
-local createHexastore = function(subject,predicate,object)
-    return
+local createHexastore = function(key, subject,predicate,object)
+    return redis.pcall('zadd', key,
         0,_stringformat("spo||%s||%s||%s",subject,predicate,object),
         0,_stringformat("sop||%s||%s||%s",subject,object,predicate),
         0,_stringformat("osp||%s||%s||%s",object,subject,predicate),
         0,_stringformat("ops||%s||%s||%s",object,predicate,subject),
         0,_stringformat("pos||%s||%s||%s",predicate,object,subject),
         0,_stringformat("pso||%s||%s||%s",predicate,subject,object)
+	)
+
 end
 
 --========================================================================
@@ -61,8 +63,8 @@ local subscribeToRoom = function()
 		redis.call('zadd', rk.sessionSubs,currentTime,clientRoomName)
 
 		--add hex of user is subbed
-		redis.call('zadd', 'hex|sessions:rooms', createHexastore(sessionId, 'is-sub-of', clientRoomName))
-
+		local created, err = createHexastore('hex|sessions:rooms', sessionId, 'is-sub-of', clientRoomName)
+		if(err) then return false, err end
 		--update tickers for room and session
 		redis.call('zadd',rk.tickRooms,'XX',0,clientRoomName)
 		redis.call('zadd',rk.tickSessions,'XX',currentTime,sessionId)

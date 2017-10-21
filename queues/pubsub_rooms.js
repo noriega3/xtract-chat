@@ -12,6 +12,7 @@ const roomActions   = require('../scripts/room/shared')
 const turnBasedActions 	= require('../scripts/room/turnbased')
 const realTimeActions 	= require('../scripts/room/realtime')
 
+const tickerQueue		  	= redisManager.tickerQueue
 const sessionQueue  		= redisManager.sessionQueue
 const roomSubQueue			= redisManager.roomSubQueue 		//handles sub/unsubs
 const chatQueue		 		= redisManager.roomChatQueue 		//handles chat messages
@@ -41,12 +42,12 @@ roomSubQueue.setMaxListeners(0)
 
 
 
-roomSubQueue.process('subscribe', (job, done) => {
+roomSubQueue.process('subscribe', (job) => {
 
 	const data = job.data
-	const sessionId = data.sessionId
-	let roomList = data.rooms ? data.rooms : []
-	let params = data.params || {}
+	const sessionId 	= data.sessionId
+	let roomList 		= data.rooms ? data.rooms : []
+	let params 			= data.params || {}
 
 	//append individual room
 	if(data.room){
@@ -58,41 +59,48 @@ roomSubQueue.process('subscribe', (job, done) => {
 	}
 
 	//check if room list is empty
-	if(roomList.length <= 0) return done(false,'EMPTY')
+	if(roomList.length <= 0){
+		return 'EMPTY'
+	}
 
 	//Check if session is active
-	roomActions.checkSessionState(sessionId)
-		.then((state) => {
-			//Filter any duplicate game rooms passed in.
-			return roomActions.filterMultipleGameRooms([sessionId, roomList]) //returns [sessionId, roomList] filtered
+	return client.checkSessionState(sessionId)
+		.tap((result) => _log('[SUB] State', result.toString()))
 
-			//Check if reservation for room based on room type
-				.then(roomActions.filterReservations) //returns [sessionId, roomList] filtered
+		//Filter any duplicate game rooms passed in.
+		.then(() => roomActions.filterMultipleGameRooms([sessionId, roomList, data.room])) //returns [sessionId, roomList] filtered
+		.tap((result) => _log('[SUB] Filter Multi', result.toString()))
 
-				//Check if user is already in the rooms passed in and filter out
-				//.then(roomActions.filterExistingSubs) //returns [sessionId, roomList] filtered
+		//Check if reservation for room based on room type
+		.then(roomActions.filterReservations) //returns [sessionId, roomList] filtered
+		.tap((result) => _log('[SUB] Filter Reserve', result.toString()))
 
-				//check if we need to create room
-				.then(roomActions.setupRooms) //returns [sessionId, roomList] creates any non existing rooms
+		//Check if user is already in the rooms passed in and filter out
+		//.then(roomActions.filterExistingSubs) //returns [sessionId, roomList] filtered
 
-				//Remove session from any existing game rooms
-				.then(roomActions.checkForGameRoomsAndUnSub)
+		//check if we need to create room
+		.then(roomActions.setupRooms) //returns [sessionId, roomList] creates any non existing rooms
+		.tap((result) => _log('[SUB] Setup', result.toString()))
 
-				//Subscribes to rooms and passes in params from job.
-				.then(roomActions.subToRooms) //subscribes to rooms
-				.then(() => {done(false, 'OK')})
-		})
+		//Remove session from any existing game rooms
+		//.then(roomActions.checkForGameRoomsAndUnSub)
+
+		//Subscribes to rooms and passes in params from job.
+		.then(roomActions.subToRooms) //subscribes to rooms
+		.tap((result) => _log('[SUB] Sub', result.toString()))
+
+		.then(() => 'OK')
+
+		.tapCatch(() => roomSubQueue.add('unsubscribe', {sessionId: sessionId, rooms: roomList}, addConfig))
 		.catch((err) => {
-
-			console.log('sub')
 			_error('[Error Subscribe]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
 
-			done('err @ subscribe')
-			//if(job.attemptsMade > 3){
+			if(err.message === "NO SESSION"){
+				//todo: fail the room
+			}
 
-			//throw new Error('Error '+ err.toString())
-			//return sessionQueue.add('destroy', {sessionId: sessionId}, {priority: 3, ...addConfig})
-			//}
+			throw new Error('Subscribe Error '+ err.toString())
 		})
 })
 
@@ -101,30 +109,33 @@ roomSubQueue.process('unsubscribe', (job) => {
 	const data 				= job.data
 	const sessionId 		= data.sessionId
 	const roomList 			= data.rooms || []
-	const overwriteState	= data.overwriteState
 	const removeEmptyRooms	= data.removeEmptyRooms || true
 
 	//append individual room
-	if(data.roomName)
+	if(data.roomName){
 		roomList.push(data.roomName)
+	}
 
 	//check if room list is empty
-	if(roomList.length <= 0) return Promise.resolve('EMPTY')
+	if(roomList.length <= 0) return 'EMPTY'
 
 	//Check if session is active
-	return roomActions.checkSessionState(sessionId, overwriteState)
+	return client.checkSessionState(sessionId)
+		.tap((result) => _log('[UNSUB] State', result.toString()))
 		.then((state) => roomActions.checkNonExistingSubsAndType([sessionId, roomList, removeEmptyRooms])) //required
+		.tap((result) => _log('[UNSUB] Check non', result.toString()))
 		.then(roomActions.unSubFromRooms)
-		.then(() => 'UNSUB OK')
+		.tap((result) => _log('[UNSUB] Unsub', result.toString()))
+		.then(() => 'OK')
 		.catch((err) => {
-			_error('[Error UnSubscribe]', err)
+			_error('[Error Unsubscribe]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
 			throw new Error('Error '+ err.toString())
-
 		})
 })
 
 
-roomSubQueue.process('onPlayerSubscribe', (job) => {
+roomSubQueue.process('onPlayerSubscribe', (job, done) => {
     const data = job.data
     //const sessionId = data.sessionId
     const roomName 	= data.roomName
@@ -162,7 +173,8 @@ roomSubQueue.process('onPlayerSubscribe', (job) => {
 
 	//don't process if nothing was added to prepare response
 	if(helper._isEmptyObject(prepareResponse)){
-		return Promise.resolve([roomType,roomName])
+		done(null, [roomType,roomName])
+		return
 	}
 
 	//attach room name to response
@@ -213,7 +225,7 @@ roomSubQueue.process('onPlayerSubscribe', (job) => {
 		})
 		.then((result) => {
 			prepareResponse = {}
-			return [roomType,roomName]
+			done(null, [roomType,roomName])
 		})
 		.tapCatch(_error)
 		.catch((err) => {
@@ -334,7 +346,7 @@ roomSubQueue.process('onPlayerUnSubscribe', (job) => {
 
 	//don't process if nothing was added to prepare response
 	if(helper._isEmptyObject(prepareResponse)){
-		return Promise.resolve([roomType,roomName])
+		return [roomType,roomName]
 	}
 
 	//attach room name to response
@@ -556,7 +568,7 @@ roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room q
 
 			_log('json sub', jsoned)
 
-			let parsed = JSON.parse(jsoned)
+			let parsed = jsoned && helper._isJson(jsoned) ? JSON.parse(jsoned) : {}
             if(!eventName) throw new Error('no event name found')
 
             _log('-----event found -0---')
@@ -584,8 +596,8 @@ roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room q
 })*/
 
 //Run a room clean up every night at 11:59 to get rooms that haven't updated in the past day (-1's are ignored)
-roomQueue.process('expireCheck', (job) => {
-	return Promise.resolve('derp')
+roomQueue.process('expireCheck', (job, done) => {
+	done(false, 'derp')
    /* let d = new Date()
     d.setDate(d.getDate() - 1)
     let expirationTime = d.getTime()
@@ -618,14 +630,11 @@ roomQueue.process('expireCheck', (job) => {
 })
 
 //Check those rooms who are past the tick update time.
-roomSubQueue.process((job) => {
+tickerQueue.process((job) => {
 	_log('room queue process')
-	return roomActions.updateServerTime().then(() => {
-			return roomActions.commandRoomTick(job)
-		}
-	)
+	return roomActions.commandRoomTick(job).tapCatch((err) => _error('process tick err', err))
 })
-roomSubQueue.add({}, {repeat: { cron: '*/2 * * * * *'}})
+//tickerQueue.add({roomTick:true}, {repeat: { cron: '*/10 * * * * *'}, removeOnComplete: true})
 
 client.defineCommand('publishToRoom', {
     numberOfKeys: 2,
@@ -633,16 +642,71 @@ client.defineCommand('publishToRoom', {
 })
 
 
+roomSubQueue.on('active', (job, jobPromise) => {
+
+/*
+	tickerQueue.pause()
+*/
+
+	globals.setVariable('SERVER_TIME', Date.now())
+
+/*	return roomActions.updateServerTime().then(()=>{
+	})*/
+})
+
+
+tickerQueue.on('active', (job, jobPromise) => {
+
+/*	//check if we should pause tickerQueue due to no users connected
+	client.exists('tick|sessions').then((doesExist) => {
+		_log('num exists', doesExist)
+
+		if(doesExist === 0){
+			_log('[ALERT] Stop and Pause Ticker Queue due to 0 Users')
+			jobPromise.cancel()
+			tickerQueue.pause()
+		} else {
+			tickerQueue.resume()
+		}
+	})*/
+})
+
+tickerQueue.on("completed", function(job){
+
+	_log('completed ticker queue')
+	//check if we should pause tickerQueue due to no users connected
+/*	client.exists('tick|sessions').then((doesExist) => {
+		_log('num exists', doesExist)
+
+		if(doesExist === 0){
+
+			_log('[ALERT] Pausing Ticker Queue due to 0 Users')
+			//roomSubQueue.clean(5000)
+			tickerQueue.pause()
+		} else {
+			//tickerQueue.resume()
+		}
+	})*/
+})
+
 roomSubQueue.on("global:completed", function(job){
+	//check if we should pause tickerQueue due to no users connected
+/*	client.exists('tick|sessions').then((doesExist) => {
+
+		if(doesExist === 0){
+
+			_log('[ALERT] Pausing Ticker Queue due to 0 Users')
+			//roomSubQueue.clean(5000)
+			tickerQueue.pause()
+		} else {
+			tickerQueue.resume()
+		}
+	})*/
 })
 
 //Clean up the onPlayerSub/Unsubs when many people join at the same time.
 roomQueue.on('stalled', function(job){
 	const jobId = job.jobId
-
-	if(jobId.startsWith('onPlayerSubscribe:')){
-
-	}
 })
 
 //Clean up the onPlayerSub/Unsubs when many people join at the same time.

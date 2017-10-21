@@ -15,6 +15,8 @@ const redisManager  		= require('./scripts/redis_manager')
 //Redis Queues
 redisManager.newQueue('sessionQueue')		//handles all session related events (TODO: separate like room queue below)
 
+redisManager.newQueue('tickerQueue')		//handles a tick of the server
+
 redisManager.newQueue('roomSubQueue') 		//handles sub/unsubs
 redisManager.newQueue('roomChatQueue') 		//handles chat messages
 redisManager.newQueue('roomGameEventQueue') //handles all general game events) sent to a room
@@ -51,6 +53,11 @@ if(cluster.isWorker){
 _logserver("[Starting] %s", SERVER_NAME)
 
 /**
+ * Migration Guide
+ * - sync any server times automatically = https://help.ubuntu.com/lts/serverguide/NTP.html
+ * currently applied to pubsub prod server/node prod, users prod, dashboard/bots/testing servers,
+ *
+ * **
  * PubSub Server - 90%
  *  (X) requires node 8.1.x with --harmony flag to enable es2017/es6/es2015 features
  *  (X) test suite to ensure bugs that are fixed are double checked to ensure all use cases are covered down the line.
@@ -187,7 +194,8 @@ process.on('SIGTERM', _onNodeClose)
  */
 process.on('uncaughtException', (err) => {
     _log('[Process Error] Uncaught Exception\n%s', err.toString())
-    process.exit(1)
+	console.log(err, err.stack.split("\n"))
+	process.exit(1)
 })
 
 

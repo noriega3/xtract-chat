@@ -24,7 +24,7 @@ local rk = {
     roomMessages            = "rooms|"..KEYS[2].."|messages",
 	roomBots	            = "rooms|"..KEYS[2].."|bots"
 }
-local userId                = response and response.userId or redis.call('hget', rk.session, 'userId')
+local userId                = response.userId or redis.call('hget', rk.session, 'userId')
 local roomExists            = redis.call('exists', rk.roomInfo) == 1
 local isBot                 = redis.call('hget', rk.session, 'bot')
 
@@ -152,4 +152,4 @@ for x=1, #funct do
 	if(not status) then	return redis.error_reply(status or err)  end
 end
 
-return redis.status_reply(status)
+return status

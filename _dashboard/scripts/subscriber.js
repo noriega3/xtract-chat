@@ -4,8 +4,8 @@ const EventEmitter 	= require('events')
 const request 		= require('request')
 const debug         = require('debug')      //https://github.com/visionmedia/debug
 const _log          = debug('sub_client')
-const config        = require('../../../../includes/env.json')[process.env.NODE_ENV || 'development']
-
+const _error        = debug('bot')
+const config  = require('../../../../includes/env.json')[process.env.NODE_ENV || 'development']
 class SubEmitter extends EventEmitter {}
 const roomActions 	= require('../../scripts/room/shared')
 const helper = require("../../utils/helpers")
@@ -41,7 +41,7 @@ function SubClient(data){
 		if (jsonStart !== -1 && jsonEnd !== -1) {
 			let bufStr = dataRaw.toString('utf8', jsonStart + 15, jsonEnd)
 
-			let response = bufStr && JSON.parse(bufStr)
+			let response = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
 			let phase = (response && response.phase) ? response.phase : false
 			let eventId = (response && response.eventId) ? response.eventId : false
 
@@ -60,7 +60,8 @@ function SubClient(data){
 	})
 
 	client.on('error', function(err) {
-		_log('bot error: '+ err.toString())
+		_error('[ERROR BOT]' + err.status, err.message)
+		console.log(err, err.stack.split("\n"))
 		client.end(err.toString())
 	})
 
@@ -136,10 +137,11 @@ function SubClient(data){
 			appName: params.appName,
 			isSimulator: false,
 		}
+		_log('port1', config['API_PORT'])
 
 		new request({
 			method: 'POST',
-			url: "http://192.168.1.12:8080/api/v1/room/reserve",
+			url: 'http://localhost:'+config['API_PORT']+'/api/v1/room/reserve',
 			json:true,
 			body: dataToSend,
 		}, (err, response, resBody) => {
@@ -167,14 +169,21 @@ function SubClient(data){
 			isSimulator: false,
 		}
 
+		_log('port', config['API_PORT'])
 		new request({
 			method: 'POST',
-			url: "http://192.168.1.12:8080/api/v1/room/reserve",
+			url: 'http://localhost:'+config['API_PORT']+'/api/v1/room/reserve',
 			json:true,
 			body: dataToSend,
 		}, (err, response, resBody) => {
+
+			_log('err bot', err, response, resBody)
 			// body is the decompressed response body
-			if(resBody.error){
+			if(err){
+				_log('error', err)
+				clientEmitter.disconnect('end', err.toString())
+
+			} else if(resBody && resBody.error){
 				_log('err', resBody)
 			} else {
 				clientEmitter.emit('reservation', resBody.response)

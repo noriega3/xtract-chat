@@ -7,7 +7,9 @@ local rk = {
 
 local sessionId             = KEYS[1]
 local currentTime           = redis.call('get', 'serverTime')
-
+if(not currentTime) then
+	return redis.error_reply('NO SERVERTIME')
+end
 --========================================================================
 -- Functions
 --========================================================================

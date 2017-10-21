@@ -3,14 +3,14 @@ local _tonumber = tonumber
 local _mathrandom = math.random
 local _unpack = unpack
 
-local createHexastore = function(subject,predicate,object)
-    return
-        0,_stringformat("spo||%s||%s||%s",subject,predicate,object),
-        0,_stringformat("sop||%s||%s||%s",subject,object,predicate),
-        0,_stringformat("osp||%s||%s||%s",object,subject,predicate),
-        0,_stringformat("ops||%s||%s||%s",object,predicate,subject),
-        0,_stringformat("pos||%s||%s||%s",predicate,object,subject),
-        0,_stringformat("pso||%s||%s||%s",predicate,subject,object)
+local createHexastore = function(key, subject,predicate,object)
+	return redis.call('zadd', key,
+	0,_stringformat("spo||%s||%s||%s",subject,predicate,object),
+	0,_stringformat("sop||%s||%s||%s",subject,object,predicate),
+	0,_stringformat("osp||%s||%s||%s",object,subject,predicate),
+	0,_stringformat("ops||%s||%s||%s",object,predicate,subject),
+	0,_stringformat("pos||%s||%s||%s",predicate,object,subject),
+	0,_stringformat("pso||%s||%s||%s",predicate,subject,object))
 end
 
 --Room properties
@@ -111,10 +111,12 @@ if(not doesRoomExist) then
 	redis.call('zadd', rk.countsRooms, 0, clientRoomName)
 
     --add hexastore for room and room type
-    redis.call('zadd', 'hex|rooms:properties', createHexastore(clientRoomName, 'is-room-type', roomType))
+	createHexastore('hex|rooms:properties', clientRoomName, 'is-room-type', roomType)
 end
 
 --update the session who created the room
-redis.call('hset', rk.session,'updated', currentTime)
+if(redis.call('hexists', rk.session, 'updated') == 1) then
+	redis.call('hset', rk.session,'updated', currentTime)
+end
 
 return redis.status_reply('OK')

@@ -145,29 +145,30 @@ local publishSubscribe = function()
 
 		for x=1, #subscribers do
 			sessionIds[x] = subscribers[x]:sub(#searchTerm)
-	end
+		end
 
 		--set sessionIds to list of ids in the room
 		dataToSend.sessionIds = sessionIds
 
 		--encode message and sessionId(s) for redis
-	local encoded = cjson.encode(dataToSend)
+		local encoded = cjson.encode(dataToSend)
 
-	--increment message id
-	local nextId = redis.call('hincrby', rk.roomInfo, "nextMessageId", 1)
+		--increment message id
+		local nextId = redis.call('hincrby', rk.roomInfo, "nextMessageId", 1)
 
-	--send user connecting to room message list to be processed by room queue
-	redis.call('zadd', rk.roomMessages, nextId, cjson.encode(dataToSend.message))
+		--send user connecting to room message list to be processed by room queue
+		redis.call('zadd', rk.roomMessages, nextId, cjson.encode(dataToSend.message))
 
-	--add user to the history, but set it to retrieve messages after their connecting message
-	redis.call('zadd', rk.roomHistory, nextId, sessionId)
+		--add user to the history, but set it to retrieve messages after their connecting message
+		redis.call('zadd', rk.roomHistory, nextId, sessionId)
 
-	--https://redis.io/commands/eval#available-libraries
-	redis.call('publish', rk.roomName, encoded)
+		--https://redis.io/commands/eval#available-libraries
+		redis.call('publish', rk.roomName, encoded)
 
-		--return the sub message to retry if failure
-	return cjson.encode(dataToSend.message)
-end
+			--return the sub message to retry if failure
+		return cjson.encode(dataToSend.message)
+	end
+
 	return false, 'NO EXIST'
 end
 

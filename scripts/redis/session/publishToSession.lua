@@ -1,23 +1,29 @@
 local _tonumber = tonumber
-local rk = {
-    tickRooms               = "tick|rooms",
-    roomName                = "rooms|"..KEYS[1],
-    roomMessages            = "rooms|"..KEYS[1].."|messages",
-    roomInfo                = "rooms|"..KEYS[1].."|info",
-}
-local clientRoomName    = KEYS[1]
-local currentTime       = redis.call('get', 'serverTime')
+
+local currentTime       	= redis.call('get', 'serverTime')
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end
 
-local message           = cjson.decode(KEYS[2]) or {}
-local ignoreChecks      = ARGV[1] == 'FORCE'
+local sessionId    			= KEYS[1]
+local sessionRoomName 		= "sessions:"..sessionId
+local message           	= cjson.decode(KEYS[2]) or {}
+local ignoreChecks      	= ARGV[1] == 'FORCE'
+
+local rk = {
+	tickSessions            = "tick|sessions",
+	tickRooms               = "tick|rooms",
+	roomName                = "rooms|"..sessionRoomName,
+	roomMessages         	= "rooms|"..sessionRoomName.."|messages",
+	roomInfo                = "rooms|"..sessionRoomName.."|info",
+}
+
+
 local roomExists        = redis.call('exists', rk.roomInfo) == 1
 
 if(ignoreChecks or roomExists) then --for unsubscribe, we will push the message to a user even if room is destroyed
 	--do validation on all non sub/unsub publish to room commands here
-	local searchTerm = '[pos||is-sub-of||'..clientRoomName..'||'
+	local searchTerm = '[pos||is-sub-of||'..sessionRoomName..'||'
 	local searchResults = redis.call('zrangebylex', 'hex|sessions:rooms', searchTerm, searchTerm..'\xff')
 	local subscribers = {}
 	for x=1, #searchResults do
@@ -33,12 +39,12 @@ if(ignoreChecks or roomExists) then --for unsubscribe, we will push the message 
 
 		if(roomExists) then
 
-			local canUpdateTick = redis.call('zscore',rk.tickRooms,clientRoomName)
+			local canUpdateTick = redis.call('zscore',rk.tickRooms,sessionRoomName)
 			canUpdateTick = canUpdateTick and _tonumber(canUpdateTick) > 0 or false --ensure that it isn't a system or standard room with tick disabled
 
 			--add update tickers for room
 			if(canUpdateTick) then
-				redis.call('zadd',rk.tickRooms, 'XX', currentTime,clientRoomName)
+				redis.call('zadd',rk.tickRooms, 'XX', currentTime,sessionRoomName)
 			end
 
 			--increase message id
@@ -57,6 +63,6 @@ if(ignoreChecks or roomExists) then --for unsubscribe, we will push the message 
 	end
 end
 
-return redis.status_reply('ROOM NOT FOUND '..KEYS[1])
+return redis.status_reply('SESSION ROOM NOT FOUND '..sessionId)
 
 

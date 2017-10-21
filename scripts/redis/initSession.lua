@@ -18,15 +18,14 @@ local rooms = {}
 
 --- Create associations list (hexastores)
 --create single hexastore
-local createHexastore = function(subject,predicate,object)
-	return {
+local createHexastore = function(key, subject,predicate,object)
+	return redis.call('zadd', key,
 		0,_stringformat("spo||%s||%s||%s",subject,predicate,object),
 		0,_stringformat("sop||%s||%s||%s",subject,object,predicate),
 		0,_stringformat("osp||%s||%s||%s",object,subject,predicate),
 		0,_stringformat("ops||%s||%s||%s",object,predicate,subject),
 		0,_stringformat("pos||%s||%s||%s",predicate,object,subject),
-		0,_stringformat("pso||%s||%s||%s",predicate,subject,object)
-	}
+		0,_stringformat("pso||%s||%s||%s",predicate,subject,object))
 end
 
 --TODO: do a check for userid here
@@ -50,7 +49,7 @@ if(mapped.sessionId) then
 	if(mapped.userId) then
 		rooms[#rooms+1] = -1
 		rooms[#rooms+1] = "users:"..mapped.userId
-		redis.call('zadd', 'hex|sessions:users', _unpack(createHexastore(mapped.sessionId, 'is-user-id', mapped.userId)))
+		createHexastore('hex|sessions:users', mapped.sessionId, 'is-user-id', mapped.userId)
 
 		if(mapped.bot) then
 			redis.call('zadd', 'tick|bots', createTime, mapped.sessionId)
@@ -65,7 +64,6 @@ if(mapped.sessionId) then
 			rooms[#rooms+1] = -1
 			rooms[#rooms+1] = mapped.appName..":"..mapped.userId
 		end
-
 	end
 end
 

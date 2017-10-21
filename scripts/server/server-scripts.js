@@ -69,6 +69,8 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 		.set('serverTime', Date.now())
 		.exec()
 		.tapCatch((err) => _error('err @ serverTime', err))
+
+	//set current servertime to now
 	globals.setVariable("SERVER_TIME", Date.now())
 }
 

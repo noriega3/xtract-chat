@@ -152,4 +152,4 @@ for x=1, #funct do
 	if(not status) then	return redis.error_reply(status or err)  end
 end
 
-return redis.status_reply(status)
+return status

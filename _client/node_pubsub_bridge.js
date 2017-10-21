@@ -10,6 +10,7 @@ const _log          = debug('ps_bridge')
 const globals       = require('../globals')
 const Sockets       = globals.sockets
 const redisManager  = require('../scripts/redis_manager')
+const helper = require("../utils/helpers");
 const roomSubQueue  = redisManager.roomSubQueue
 const roomQueue     = redisManager.roomQueue
 const sessionQueue  = redisManager.sessionQueue
@@ -49,9 +50,10 @@ const helpers = {
             const bufStr        = socket.buffer.toString('utf8',initStart+8,initEnd)
 			_log('json sub setup init', bufStr)
 
-			const playerData    = JSON.parse(bufStr)
+			const playerData    = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
 
-            //return helpers.removeInitsFromBuffer(socket)
+
+			//return helpers.removeInitsFromBuffer(socket)
             sliced.fill(0)
             socket.bufferLen -= (initStart+initEnd+11)
 			return sessionQueue.add('init',{sessionId: socket.sessionId, playerData: playerData }, {...addConfig})
@@ -118,7 +120,7 @@ const onSocketData = (socket, dataRaw) => {
             let bufStr = buf.toString('utf8',jsonStart+15,jsonEnd)
 			_log('json intent', bufStr)
 
-            let data = JSON.parse(bufStr)
+            let data = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
             let intent = (data && data.intent) ? data.intent : false
 
             _log('[Request]', bufStr)

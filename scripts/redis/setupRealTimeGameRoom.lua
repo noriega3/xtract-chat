@@ -69,8 +69,10 @@ redis.call('zadd',rk.tickRooms,updateTime,clientRoomName)
 
 --refresh and cleanup expired reservations
 local expiredReserves = redis.call('zrangebyscore', rk.roomReserves, 0, currentTime)
-for x=1, #expiredReserves do
-	removeHexReserve(expiredReserves[x], 'is-reserve-of', clientRoomName)
+if(#expiredReserves > 0) then
+	for x=1, #expiredReserves do
+		removeHexReserve(expiredReserves[x], 'is-reserve-of', clientRoomName)
+	end
 end
 redis.call('zremrangebyscore', rk.roomReserves, 0, currentTime)
 
@@ -140,6 +142,8 @@ if(not doesRoomExist) then
 end
 
 --update the session who created the room
-redis.call('hset', rk.session,'updated', currentTime)
+if(redis.call('hexists', rk.session, 'updated') == 1) then
+	redis.call('hset', rk.session,'updated', currentTime)
+end
 
 return redis.status_reply('OK')

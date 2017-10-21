@@ -4,13 +4,13 @@ local _stringformat = string.format
 local roomType = 1
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
-local roomArr               = cjson.decode(KEYS[3]) or {}
+local roomArr               = cjson.decode(KEYS[3])
 local currentTime           = redis.call('get', 'serverTime')
 
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end
-local response              = cjson.decode(ARGV[1]) or {}
+local response              =  cjson.decode(ARGV[1]) or {}
 local numSubscribers        = 0
 
 local rk = {
@@ -27,7 +27,8 @@ local rk = {
     roomInfo                = "rooms|"..KEYS[2].."|info",
     roomHistory             = "rooms|"..KEYS[2].."|history",
     roomMessages            = "rooms|"..KEYS[2].."|messages",
-    roomBots	            = "rooms|"..KEYS[2].."|bots"
+    roomBots	            = "rooms|"..KEYS[2].."|bots",
+	roomReserves            = "rooms|"..KEYS[2].."|reserves"
 }
 local userId                = response and response.userId or redis.call('hget', rk.session, 'userId')
 local roomExists            = redis.call('exists', rk.roomInfo) == 1
@@ -57,8 +58,9 @@ local unSubscribeToRoom = function()
 	local remObserverSeat, remPlayerSeat
 
 	--find available seat and remove open seat
-	local memberIndex = redis.call('zrangebylex', rk.roomName, '[taken:session:'..sessionId, '[taken:session:'..sessionId, 'LIMIT', 0, 1)
-	local seat = memberIndex and memberIndex[1] and memberIndex[1]:gsub("taken:session:"..sessionId..":", "") or false
+	local searchTerm = '[taken:session:'..sessionId..':'
+	local memberIndex = redis.call('zrangebylex', rk.roomName, searchTerm, searchTerm..'\xff', 'LIMIT', 0, 1)
+	local seat = memberIndex and memberIndex[1] and memberIndex[1]:sub(#searchTerm) or false
 	if(seat) then
 		--remove that player from the obs or player seat
 		remPlayerSeat   = redis.call('zrem',rk.roomName,"taken:seat:"..seat..":"..sessionId) == 1
@@ -165,6 +167,7 @@ local publishUnSubscribe = function()
 	--https://redis.io/commands/eval#available-libraries
 	redis.call('publish', rk.roomName, encoded)
 
+
 	--always return num subscribers so we can destroy or not
 	return numSubscribers
 end
@@ -185,4 +188,4 @@ for x=1, #funct do
 	if(not status) then	return redis.error_reply(status or err)  end
 end
 
-return redis.status_reply(status)
+return status

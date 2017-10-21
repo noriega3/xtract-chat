@@ -38,14 +38,14 @@ local isBot                 = redis.call('hget', rk.session, 'bot')
 --========================================================================
 
 --create removal string for hexastore
-local createRemHexastore = function(subject,predicate,object)
-    return
+local createRemHexastore = function(key, subject,predicate,object)
+    return redis.call('zrem', key,
         _stringformat("spo||%s||%s||%s",subject,predicate,object),
         _stringformat("sop||%s||%s||%s",subject,object,predicate),
         _stringformat("osp||%s||%s||%s",object,subject,predicate),
         _stringformat("ops||%s||%s||%s",object,predicate,subject),
         _stringformat("pos||%s||%s||%s",predicate,object,subject),
-        _stringformat("pso||%s||%s||%s",predicate,subject,object)
+        _stringformat("pso||%s||%s||%s",predicate,subject,object))
 
 end
 
@@ -57,7 +57,7 @@ local unSubscribeToRoom = function()
 	local remObserverSeat, remPlayerSeat
 
 	--find available seat and remove open seat
-	local memberIndex = redis.call('zrangebylex', rk.roomName, '[taken:session:'..sessionId, '[taken:session:'..sessionId, 'LIMIT', 0, 1)
+	local memberIndex = redis.call('zrangebylex', rk.roomName, '[taken:session:'..sessionId..':', '[taken:session:'..sessionId..':\xff', 'LIMIT', 0, 1)
 	local seat = memberIndex and memberIndex[1] and memberIndex[1]:gsub("taken:session:"..sessionId..":", "") or false
 	if(seat) then
 		--remove that player from the obs or player seat
@@ -72,10 +72,10 @@ local unSubscribeToRoom = function()
 	redis.call('srem', rk.roomBots, sessionId)
 
 	--remove hexastores associating session and room
-	redis.call('zrem', 'hex|sessions:rooms', createRemHexastore(sessionId, 'is-sub-of', clientRoomName))
+	createRemHexastore('hex|sessions:rooms', sessionId, 'is-sub-of', clientRoomName)
 
 	--remove gameroom hex
-	redis.call('zrem', 'hex|sessions:rooms', createRemHexastore(sessionId, 'has-gameroom-of', clientRoomName))
+	createRemHexastore('hex|sessions:rooms', sessionId, 'has-gameroom-of', clientRoomName)
 
 	if(roomExists) then
 		--update tickers for room and session
@@ -185,4 +185,4 @@ for x=1, #funct do
 	if(not status) then	return redis.error_reply(status or err)  end
 end
 
-return redis.status_reply(status)
+return status
