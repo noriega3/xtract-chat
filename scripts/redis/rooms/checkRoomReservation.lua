@@ -1,4 +1,5 @@
 local _stringformat = string.format
+local _tonumber = tonumber
 
 --removes the hex reservation
 local function removeHexReserve(subject,object)
@@ -13,7 +14,7 @@ end
 
 local sessionId             = KEYS[1]
 local clientRoomName        = KEYS[2]
-local currentTime           = redis.call('get', 'serverTime')
+local currentTime           = _tonumber(redis.call('get', 'serverTime'))
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end

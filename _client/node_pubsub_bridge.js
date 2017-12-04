@@ -7,6 +7,7 @@ const uuid5         = require('uuid/v5')    //https://github.com/broofa/node-uui
 const debug         = require('debug')      //https://github.com/visionmedia/debug
 const buffer         = require('buffer')      //https://github.com/visionmedia/debug
 const _log          = debug('ps_bridge')
+const _error          = debug('error')
 const globals       = require('../globals')
 const Sockets       = globals.sockets
 const redisManager  = require('../scripts/redis_manager')
@@ -51,7 +52,6 @@ const helpers = {
 			_log('json sub setup init', bufStr)
 
 			const playerData    = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
-
 
 			//return helpers.removeInitsFromBuffer(socket)
             sliced.fill(0)
@@ -106,10 +106,11 @@ const onSocketData = (socket, dataRaw) => {
     if (globals.getVariable("isMaintenanceMode")) return onSocketClose(socket.destroy())
 
     //Init or resume client based on values send in
-    helpers.setupInit(socket)
+    helpers.setupInit(socket) //NOTE: this make take time, so other requests before will be "lost"
 
 	//Extract the json string from buffer
     let parseJson = (buf) => {
+		socket.pause()
 
         //Unlike init, we start from beginning of buffer
         let jsonStart = buf.indexOf('__JSON__START__')
@@ -118,8 +119,6 @@ const onSocketData = (socket, dataRaw) => {
         if(jsonStart !== -1 && jsonEnd !== -1){
 
             let bufStr = buf.toString('utf8',jsonStart+15,jsonEnd)
-			_log('json intent', bufStr)
-
             let data = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
             let intent = (data && data.intent) ? data.intent : false
 
@@ -127,11 +126,17 @@ const onSocketData = (socket, dataRaw) => {
 
             //Determine route based on intent
             switch(intent){
+				case "ssoCheck": //SSO = single sign-off logic
+					sessionQueue.add('sendSsoCheck',{sessionId: socket.sessionId, appName: data.appName, userId: data.userId }, addConfig)
+					break
+				case "ssoLogout": //SSO = single sign-off logic
+					sessionQueue.add('verifySsoCheck',{sessionId: socket.sessionId, rawMessage: data}, addConfig)
+					break
                 case "subscribe":
-					roomSubQueue.add('subscribe',{sessionId: socket.sessionId, room: data.roomName, params:data.params }, {...addConfig})
+					roomQueue.add('subscribe',{sessionId: socket.sessionId, room: data.roomName, params:data.params }, {...addConfig})
                     break
                 case "unsubscribe":
-					roomSubQueue.add('unsubscribe',{sessionId: socket.sessionId, room: data.roomName, params:data.params },{...addConfig})
+					roomQueue.add('unsubscribe',{sessionId: socket.sessionId, room: data.roomName, params:data.params },{...addConfig})
                     break
                 case "disconnect":
                     helpers.disconnectSocket(sessionId)
@@ -151,29 +156,31 @@ const onSocketData = (socket, dataRaw) => {
                 case "eventConfirm":
                     roomQueue.add('verifyRoomEvent',{sessionId: socket.sessionId, eventId: data.eventId }, {priority: 2, ...addConfig})
                     break
+				case "sendTurnEvent":
+					roomQueue.add('sendTurnEvent',{sessionId: socket.sessionId, room: data.room, eventId: data.eventId, params:data.params }, addConfig)
+					break
                 default:
-                    _log("No intent defined for data: ", data)
+                    _error("No intent defined for data: ", data)
                     break
             }
 
             //take out the json, and rerun the function to ensure we have executed all the json in the buffer
             let sliced = socket.buffer.slice(jsonStart,jsonEnd+13)
             sliced.fill(0)
-            return parseJson(socket.buffer)
+			return parseJson(socket.buffer)
         } else {
-            return false
+			socket.resume()
+			return false
         }
     }
 
     parseJson(socket.buffer)
     _log('[Data Finish]', socket.bufferLen)
-	const buf2 = Buffer.from(socket.buffer);
-	_log('[Data Buf String]:', buf2.toString())
-    socket.resume()
+	//const buf2 = Buffer.from(socket.buffer);
+	//_log('[Data Buf String]:', buf2.toString())
 }
 
 const onSocketError = (sessionId) => {
-    let socket = Sockets.getSocketBySessionId(sessionId)
 
     //TODO: redis ensure redis instance is valid before settings timers
     //TODO: redis set expiration on client to 10 - turn based
@@ -191,11 +198,11 @@ const onSocketClose = (sessionId) => {
 
         socket.destroy()
         Sockets.deleteSocketBySessionId(sessionId)
+		socket = null
     })
 }
 
 const onSocketTimeout = (sessionId) => {
-    let socket = Sockets.getSocketBySessionId(sessionId)
 
     //TODO: redis set flag that user expired, set a timer from here to allow them one more turn on turn based or x seconds
 }
@@ -215,8 +222,6 @@ function clientBridge(socket){
     const remoteIp = socket.remoteAddress + ':' + socket.remotePort
     let sessionId = uuid5(remoteIp,serverUuid)
 
-	_log('new session id is: %s', sessionId)
-
     socket.serverVersion    = 2
     socket.sessionId        = sessionId
     socket.name             = remoteIp
@@ -228,6 +233,13 @@ function clientBridge(socket){
     //_log('[Buffer Length]: %s', socket.bufferLen)
 
     //socket.setEncoding('utf-8') //TODO: check if this will cause processing we dont need
+	/**
+	 * Reasoning on "too fast" node actions (https://www.bennadel.com/blog/3236-using-transform-streams-to-manage-backpressure-for-asynchronous-tasks-in-node-js.htm)
+	 * .on("data") will put the readable stream into "flowing" mode, which means that it will start emitting data events as fast as they can be produced by the underlying source.
+	 * Unfortunately, if you're trying to take that data and insert it into a Redis database, for instance, the "data" handler has no way of telling the upstream source to pause while the Redis operation is executing.
+	 * As such, you can quickly overwhelm your Redis connection pool and command queue as well as consume an inappropriately large amount of process memory.
+	 * Solution: using bull queue to manage queues coming in. seems to work so far.
+	 */
     socket.on('data', (rawData) => onSocketData(socket,rawData))
     socket.on('error', (e) => onSocketError(sessionId,e))
     socket.on('close', () => onSocketClose(sessionId))

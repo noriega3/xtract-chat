@@ -1,6 +1,7 @@
 //Global handler for all rooms
 //TODO: rename from roomQueue to allRoomsQueue
 
+const _       		= require('lodash') //https://lodash.com/docs/4.17.4
 const cluster       = require('cluster')
 const fs            = require('fs') //https://github.com/visionmedia/debug
 const debug         = require('debug') //https://github.com/visionmedia/debug
@@ -42,7 +43,7 @@ roomSubQueue.setMaxListeners(0)
 
 
 
-roomSubQueue.process('subscribe', (job) => {
+roomQueue.process('subscribe', (job) => {
 
 	const data = job.data
 	const sessionId 	= data.sessionId
@@ -91,7 +92,7 @@ roomSubQueue.process('subscribe', (job) => {
 
 		.then(() => 'OK')
 
-		.tapCatch(() => roomSubQueue.add('unsubscribe', {sessionId: sessionId, rooms: roomList}, addConfig))
+		.tapCatch(() => roomQueue.add('unsubscribe', {sessionId: sessionId, rooms: roomList}, addConfig))
 		.catch((err) => {
 			_error('[Error Subscribe]', err.status, err.message)
 			console.log(err, err.stack.split("\n"))
@@ -104,7 +105,7 @@ roomSubQueue.process('subscribe', (job) => {
 		})
 })
 
-roomSubQueue.process('unsubscribe', (job) => {
+roomQueue.process('unsubscribe', (job) => {
 
 	const data 				= job.data
 	const sessionId 		= data.sessionId
@@ -135,7 +136,7 @@ roomSubQueue.process('unsubscribe', (job) => {
 })
 
 
-roomSubQueue.process('onPlayerSubscribe', (job, done) => {
+roomQueue.process('onPlayerSubscribe', (job, done) => {
     const data = job.data
     //const sessionId = data.sessionId
     const roomName 	= data.roomName
@@ -200,16 +201,11 @@ roomSubQueue.process('onPlayerSubscribe', (job, done) => {
 				const openSpots = maxSubscribers - numSubscribers
 				const openSpotsWithoutBots = maxSubscribers - (numSubscribers - numBots)
 
-				if(isBot && numBots === numSubscribers){
-					_error('REMOVE A BOT')
-
-				}
-
 				//remove bots if full or completely empty
 				if((openSpots === 0 && openSpotsWithoutBots > 1) || (openSpotsWithoutBots === maxSubscribers && isBot)){
 					return botsQueue.add({roomName: response.roomName, intent:"remove"},{jobId: response.roomName+":"+openSpots, ...addConfig})
 				} else if(openSpotsWithoutBots > 1 && numBots < maxBots){
-					return botsQueue.add({roomName: response.roomName, roomType: response.roomType, intent:"add"},{jobId: response.roomName+":"+openSpots, ...addConfig})
+					return botsQueue.add({roomName: response.roomName, roomType: response.roomType, roomGame: roomGame, roomTheme: roomTheme, intent:"add"},{jobId: response.roomName+":"+openSpots, ...addConfig})
 				}
 			}
 
@@ -233,7 +229,7 @@ roomSubQueue.process('onPlayerSubscribe', (job, done) => {
 		})
 })
 
-roomUpdateQueue.process('roomUpdate', (job) => {
+roomQueue.process('roomUpdate', (job) => {
 	const data = job.data
 	//const sessionId = data.sessionId
 	const roomName 	= data.roomName
@@ -252,6 +248,8 @@ roomUpdateQueue.process('roomUpdate', (job) => {
 			prepareResponse.players 	= roomActions.getPlayersDataFromGameRoom(data.roomName, {roomType: data.roomType})
 			prepareResponse.matchState	= turnBasedActions.getMatchState(data.roomName)
 			prepareResponse.matchData 	= turnBasedActions.getMatchData(data.roomName)
+			prepareResponse.turnExpiration = prepareResponse.turnExpireAt
+			prepareResponse.gameState = prepareResponse.matchState
 			break
 		case 'slots':
 		case 'poker':
@@ -302,13 +300,12 @@ roomUpdateQueue.process('roomUpdate', (job) => {
 			prepareResponse = {}
 			return [roomType,roomName]
 		})
-		.tapCatch(_error)
 		.catch((err) => {
 			_error('[Error update]', err)
 		})
 })
 
-roomSubQueue.process('onPlayerUnSubscribe', (job) => {
+roomQueue.process('onPlayerUnSubscribe', (job) => {
 	const data = job.data
 	//const sessionId = data.sessionId
 	const roomName 	= data.roomName
@@ -327,6 +324,9 @@ roomSubQueue.process('onPlayerUnSubscribe', (job) => {
 			prepareResponse.players 	= roomActions.getPlayersDataFromGameRoom(data.roomName, {roomType: data.roomType})
 			prepareResponse.matchState	= turnBasedActions.getMatchState(data.roomName)
 			prepareResponse.matchData 	= turnBasedActions.getMatchData(data.roomName)
+			prepareResponse.turnExpiration = prepareResponse.turnExpireAt
+			prepareResponse.gameState = prepareResponse.matchState
+
 			break
 		case 'slots':
 		case 'poker':
@@ -381,7 +381,7 @@ roomSubQueue.process('onPlayerUnSubscribe', (job) => {
 				if((openSpots === 0 && openSpotsWithoutBots > 1) || (openSpotsWithoutBots === maxSubscribers) || (numBots === numSubscribers && isBot)){
 					return botsQueue.add({roomName: response.roomName, intent:"remove"},{jobId: response.roomName+":"+openSpots, ...addConfig} )
 				} else if(openSpotsWithoutBots > 1 && numBots < maxBots && !isBot){ //only add bots on unsub when it is not a user
-					return botsQueue.add({roomName: response.roomName, roomType: response.roomType, intent:"add"},{jobId: response.roomName+":"+openSpots, ...addConfig} )
+					return botsQueue.add({roomName: response.roomName, roomType: response.roomType, roomGame: roomGame, roomTheme: roomTheme, intent:"add"},{jobId: response.roomName+":"+openSpots, ...addConfig} )
 				}
 			}
 		})
@@ -399,22 +399,19 @@ roomSubQueue.process('onPlayerUnSubscribe', (job) => {
 			prepareResponse = {}
 			return [roomType,roomName]
 		})
-		.tapCatch(_error)
 		.catch((err) => {
 			_error('[Error OnUnSubscribe]', err)
 		})
 })
 
-roomSubQueue.process('publish', (job, done) => {
+roomQueue.process('publish', (job, done) => {
     const data = job.data
     const skipChecks = data.skipChecks ? 'FORCE' : ''
     const message = data.message
 	const serverTime = globals.getVariable("SERVER_TIME")
 
-	_log('publishing', serverTime)
     client.publishToRoom(message.room, JSON.stringify(message), skipChecks)
         .then((results) => {
-    	_log('published message', message.room, results)
     		done(false, 'OK')
         })
         .catch((err) => {
@@ -566,8 +563,6 @@ roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room q
         .then((jsoned) => {
             let eventName = eventId.split('|')[1]
 
-			_log('json sub', jsoned)
-
 			let parsed = jsoned && helper._isJson(jsoned) ? JSON.parse(jsoned) : {}
             if(!eventName) throw new Error('no event name found')
 
@@ -594,6 +589,35 @@ roomQueue.process('verifyRoomEvent', (job) => { //verifies an eventId for room q
             done(err.toString())
         })
 })*/
+
+roomQueue.process('sendTurnEvent', (job) => {
+	const data = job.data
+	const sessionId 	= data.sessionId
+	const room 			= data.room
+	const params 		= data.params || {}
+
+	return client.checkSessionState(sessionId)
+		.tap((result) => _log('[TURN] Session State', result.toString()))
+
+		//Forward event to turn based file to execute
+		.then(() => turnBasedActions.processEvent(sessionId, room, params))
+		.tap((result) => _log('[TURN] Process Event', result.toString()))
+
+		.then(() => 'OK')
+
+		//On error, we unsubscribe user immediately TODO: switch to 3rd retry
+		.tapCatch(() => roomQueue.add('unsubscribe', {sessionId: sessionId, room: room}, addConfig))
+		.catch((err) => {
+			_error('[Error Turn Event]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
+
+			if(err.message === "NO SESSION"){
+				//todo: fail the room
+			}
+
+			throw new Error('Turn Event Error '+ err.toString())
+		})
+})
 
 //Run a room clean up every night at 11:59 to get rooms that haven't updated in the past day (-1's are ignored)
 roomQueue.process('expireCheck', (job, done) => {
@@ -631,18 +655,155 @@ roomQueue.process('expireCheck', (job, done) => {
 
 //Check those rooms who are past the tick update time.
 tickerQueue.process((job) => {
-	_log('room queue process')
-	return roomActions.commandRoomTick(job).tapCatch((err) => _error('process tick err', err))
+	const updateServerTime = () => client.set("serverTime", Date.now())
+	const checkExpires = () => {
+		const serverTime = Date.now()
+		const expiredTime = 60000 //60 sec expiration without an update
+		let roomList = []
+		let multi
+		//move expired ones to another table for processing
+		return client.zrangebyscore('tick|rooms', '(0', serverTime-expiredTime, 'LIMIT', 0, 25)
+			.tap((rooms)=> {
+				multi = client.multi()
+			})
+			.each((roomName) => {
+				multi.zadd('expires|rooms', 0, roomName)
+				//get all sessions in the room w/ roomType
+				return Promise.resolve(roomActions.findAndDestroyRoom(roomName)).tapCatch((err) => {
+					_error('err @ tick', err)
+				})
+			})
+			.tap(() => {
+				if(roomList.length > 0){
+					return multi.exec()
+				} else {
+					multi.discard()
+					return []
+				}
+			})
+			.then((result) => {
+				return result
+			})
+			.tapCatch((err) => {
+				_error('err @ tick', err)
+			})
+
+		/*
+                //process the rooms that need a tick
+                return new Promise((resolve, reject) => {
+                    let dbRoomList = []
+                    let roomKey, roomName
+                    const roomsListKey = helper._bar('tick', 'rooms')
+                    const stream = client.zscanStream(roomsListKey)
+                    const multi = client.multi()
+
+                    stream.on('data', (result) => {
+                        if (Array.isArray(result)) {
+                            for (let i = 0; i < result.length; i += 2) {
+                                roomName = result[i]
+                                roomKey = helper._bar('rooms', roomName, 'info')
+                                dbRoomList.push(roomName)
+                                multi.hget(roomKey, 'roomTypeId')
+                            }
+                        }
+                    })
+
+                    stream.on('end', () => {
+                        multi.exec()
+                            .map(([err, roomType], index) => [parseInt(roomType), dbRoomList[index]])
+                            .then((activeRoomList) => {
+                                resolve(activeRoomList);
+                            })
+                            .catch(reject)
+                    })
+
+                    stream.on('error', reject)
+                })*/
+	}
+
+	const checkRoomStates = () => {
+		const serverTime = Date.now()
+
+		let roomList = []
+		return client.zrangebyscore('tick|rooms', '(0', serverTime-800, 'LIMIT', 0, 25)
+			.each((roomName) => {
+				const roomInfoKey = helper._bar('rooms', roomName, 'info')
+				return client.hmget(roomInfoKey, 'roomTypeId', 'nextMessageId')
+					.then(([roomType, nextMessageId]) => {
+						switch(_.toNumber(roomType)){
+							case TURNBASED_ROOM_TYPE:
+								return turnBasedActions.processTickEvent(roomName, serverTime, nextMessageId)
+							default:
+								return 'OK'
+						}
+					})
+
+			})
+			.then((results) => {
+				return 'OK'
+			})
+			.tapCatch((err) => {
+				_error('err @ tick', err)
+			})
+	}
+
+	const checkRoomUpdates = () => {
+
+		return 'done too'
+		/*//process the rooms that need a tick
+        return new Promise((resolve, reject) => {
+            let dbRoomList = []
+            let roomKey, roomName
+            const roomsListKey = helper._bar('tick', 'rooms')
+            const stream = client.zscanStream(roomsListKey)
+            const multi = client.multi()
+
+            stream.on('data', (result) => {
+                if (Array.isArray(result)) {
+                    for (let i = 0; i < result.length; i += 2) {
+                        roomName = result[i]
+                        roomKey = helper._bar('rooms', roomName, 'info')
+                        dbRoomList.push(roomName)
+                        multi.hget(roomKey, 'roomTypeId')
+                    }
+                }
+            })
+
+            stream.on('end', () => {
+                multi.exec()
+                    .map(([err, roomType], index) => [parseInt(roomType), dbRoomList[index]])
+                    .then((activeRoomList) => {
+                        resolve(activeRoomList);
+                    })
+                    .catch(reject)
+            })
+
+            stream.on('error', reject)
+        })*/
+	}
+
+	return Promise.all([updateServerTime(), checkExpires(),checkRoomStates(),checkRoomUpdates()]).tap((results) => {
+		return results
+	})
+		.tapCatch((err) => {
+			_error('ERROR @ TICK', err.toString())
+		})
+
+
+
+
+	//return roomActions.commandRoomTick(job).tapCatch((err) => _error('process tick err', err))
 })
-//tickerQueue.add({roomTick:true}, {repeat: { cron: '*/10 * * * * *'}, removeOnComplete: true})
+tickerQueue.add({roomTick:true}, {repeat: { cron: '*/1 * * * * *'}, removeOnComplete: true})
 
 client.defineCommand('publishToRoom', {
     numberOfKeys: 2,
-    lua: fs.readFileSync("./scripts/redis/publishToRoom.lua", "utf8")
+    lua: fs.readFileSync("./scripts/redis/rooms/publishToRoom.lua", "utf8")
 })
 
 
-roomSubQueue.on('active', (job, jobPromise) => {
+roomQueue.on('global:active', (job, jobPromise) => {
+	client.set("serverTime", Date.now())
 
 /*
 	tickerQueue.pause()
@@ -654,8 +815,23 @@ roomSubQueue.on('active', (job, jobPromise) => {
 	})*/
 })
 
+roomQueue.on('global:completed', (job) => {
+	client.set("serverTime", Date.now())
+
+	/*
+        tickerQueue.pause()
+    */
+
+	globals.setVariable('SERVER_TIME', Date.now())
+
+	/*	return roomActions.updateServerTime().then(()=>{
+        })*/
+})
+
 
 tickerQueue.on('active', (job, jobPromise) => {
+
+	client.set("serverTime", Date.now())
 
 /*	//check if we should pause tickerQueue due to no users connected
 	client.exists('tick|sessions').then((doesExist) => {
@@ -673,7 +849,8 @@ tickerQueue.on('active', (job, jobPromise) => {
 
 tickerQueue.on("completed", function(job){
 
-	_log('completed ticker queue')
+	client.set("serverTime", Date.now())
+
 	//check if we should pause tickerQueue due to no users connected
 /*	client.exists('tick|sessions').then((doesExist) => {
 		_log('num exists', doesExist)
@@ -689,7 +866,7 @@ tickerQueue.on("completed", function(job){
 	})*/
 })
 
-roomSubQueue.on("global:completed", function(job){
+roomQueue.on("global:completed", function(job){
 	//check if we should pause tickerQueue due to no users connected
 /*	client.exists('tick|sessions').then((doesExist) => {
 
@@ -707,6 +884,8 @@ roomSubQueue.on("global:completed", function(job){
 //Clean up the onPlayerSub/Unsubs when many people join at the same time.
 roomQueue.on('stalled', function(job){
 	const jobId = job.jobId
+
+	_error("job is stalled", job)
 })
 
 //Clean up the onPlayerSub/Unsubs when many people join at the same time.
@@ -722,7 +901,7 @@ roomQueue.on('error', function(job){
 })
 
 //Clean up the onPlayerSub/Unsubs when many people join at the same time.
-roomSubQueue.on('error', function(job){
+roomQueue.on('error', function(job){
 	const jobId = job.jobId
 
 	console.log('err @ roomSubQ')

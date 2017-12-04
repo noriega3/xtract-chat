@@ -2,6 +2,7 @@
  * Creates redis instances and wraps the bull queue to share redis instances for client/sub and rest of server
  */
 'use strict'
+const _         	= require('lodash')
 const Redis         = require('ioredis')
 const Queue         = require('bull')
 const debug         = require('debug')      //https://github.com/visionmedia/debug
@@ -49,7 +50,7 @@ const queueOverwrites = {
 			case 'client': return dbClient
 			case 'subscriber': return dbSubscriber
 			default:
-				return new Redis(opts)
+				return new Redis(_.merge(opts, configDefault))
 		}
 	}
 }
@@ -62,7 +63,8 @@ Manager.settingsClient = dbServerSettings
 
 //Wrapper that creates a new bull queue to always use same redis connection
 Manager.newQueue = (name) => {
-	let newQueue = new Queue(name, queueOverwrites, configDefault) //supports redis clustering (NOT node clustering via pm2)
+
+	let newQueue = new Queue(name, queueOverwrites) //supports redis clustering (NOT node clustering via pm2)
 	newQueue.name = name
 	Manager[name] = newQueue
 	_log("[Created a new queue: %s]", name)

@@ -177,9 +177,10 @@ function SubClient(data){
 			body: dataToSend,
 		}, (err, response, resBody) => {
 
-			_log('err bot', err, response, resBody)
 			// body is the decompressed response body
 			if(err){
+				_log('err bot', err, response, resBody)
+
 				_log('error', err)
 				clientEmitter.disconnect('end', err.toString())
 

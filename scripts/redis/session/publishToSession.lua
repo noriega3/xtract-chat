@@ -1,6 +1,6 @@
 local _tonumber = tonumber
 
-local currentTime       	= redis.call('get', 'serverTime')
+local currentTime       	= _tonumber(redis.call('get', 'serverTime'))
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')
 end
@@ -49,6 +49,9 @@ if(ignoreChecks or roomExists) then --for unsubscribe, we will push the message 
 
 			--increase message id
 			local nextId = redis.call('hincrby', rk.roomInfo, 'nextMessageId', 1)
+
+			--add message id to ensure ordered messages by the time it reaches node
+			dataToSend.messageId = nextId
 
 			--add to list of messages
 			redis.call('zadd',rk.roomMessages, nextId, cjson.encode(dataToSend.message))

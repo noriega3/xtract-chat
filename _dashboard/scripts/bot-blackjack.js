@@ -49,7 +49,55 @@ function Bot(roomName, params) {
 
 		bot.on('subscribed', function(data){
 			if(data.room === roomName){
+				bot.connectedRoom = roomName
 
+				params.room = roomName
+				params.isOptIn = true
+				const message = {
+					sessionId: bot.sessionId,
+					userId:	props.userId,
+					roomName: roomName,
+					appName: roomArr.roomAppName,
+					isSimulator: false,
+					intent: "sendTurnEvent",
+					room:roomName,
+					params: {
+						event: "optIn"
+					}
+				}
+
+				bot.publish(message)
+			}
+		})
+		bot.on('roomUpdate', function(data){
+			if(!data.response){ return }
+			const matchState = data.response.matchState
+			const optIns = data.response.optIns
+
+			switch(matchState){
+				case 'OPT_IN':
+					if(!params.isOptIn && optIns && optIns.length > 0){
+						params.isOptIn = true
+						const message = {
+							sessionId: bot.sessionId,
+							userId:	props.userId,
+							roomName: roomName,
+							appName: roomArr.roomAppName,
+							isSimulator: false,
+							intent: "sendTurnEvent",
+							room:roomName,
+							params: {
+								event: "optIn"
+							}
+						}
+
+						bot.publish(message)
+					}
+					break
+				case 'CANCELLED':
+				case 'COMPLETE':
+					params.isOptIn = false
+					break
 			}
 		})
 

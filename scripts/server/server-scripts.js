@@ -1,8 +1,10 @@
 'use strict'
 const debug     = require('debug')      //https://github.com/visionmedia/debug
+const _ 		= require('lodash')
 const fs 		= require('fs')
 const globals   = require('../../globals')
 const _log      = debug('server-script')
+const dbConfig	= require('../../_confs/config.default.json')
 let client, subClient, settingsClient
 
 const scripts = function(dbClient, dbSubscriber, dbSettings){
@@ -40,26 +42,12 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 
 	client.defineCommand('updateSessionData', {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/events/updateSessionData.lua", "utf8")
-	})
-
-	client.defineCommand('expireSession', {
-		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/redis/expireSession.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/session/updateSessionData.lua", "utf8")
 	})
 
 	client.defineCommand('prepareRoomEvent', {
 		numberOfKeys: 5,
-		lua: fs.readFileSync("./scripts/redis/prepareRoomEvent.lua", "utf8")
-	})
-
-	client.defineCommand('incrServerTick', {
-		numberOfKeys: 0,
-		lua: fs.readFileSync("./scripts/events/incrServerTime.lua", "utf8")
-	})
-
-	client.defineCommand('getServerTick', {
-		lua: fs.readFileSync("./scripts/events/getServerTime.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/rooms/prepareRoomEvent.lua", "utf8")
 	})
 
 	//Clear db 0 from last session
@@ -75,31 +63,82 @@ const scripts = function(dbClient, dbSubscriber, dbSettings){
 }
 
 scripts.updateServerConfig = () => {
-	return settingsClient.multi()
-		.get('settings:_maintenanceMode')
-		.get('settings:_nextMaintenance')
-		.hgetall('settings:bots:enabledRooms')
-		.hgetall('settings:maxSubscribersPerRoom') //renamed from maxUsersPerRoom v1
-		.hgetall('settings:maxObserversPerRoom')
-		.hgetall('settings:roomEvents')
-		.smembers('settings:appNames')
-		.exec()
+
+	const settingMulti = settingsClient.multi()
+	let serverConfig = {}
+	let setting
+
+	_.forEach(dbConfig, (value, key) => {
+		setting =  dbConfig[key]
+		if(_.isFunction(settingMulti[setting.getType])){
+			_.invoke(settingMulti, setting.getType, setting.key)
+		}
+	})
+
+	return settingMulti.exec()
 		.then((configs) => {
-			let serverConfig = {
-				maintenanceMode: 		configs[0][1],
-				nextMaintenance: 		configs[1][1],
-				botEnabledRooms: 		configs[2][1],
-				maxSubscribersPerRoom: 	configs[3][1], //renamed from maxUsersPerRoom v1
-				maxObserversPerRoom: 	configs[4][1],
-				roomEvents:      		configs[5][1] || [],
-				appNameList:     		configs[6][1] || [],
+			console.log('empty result check')
+			console.log(configs)
+			if(_.isEmpty(configs) || configs[0][0] || configs[0][1] === null){
+
+				_log('creating default config', dbConfig)
+				const settingMulti2 = settingsClient.multi()
+
+				_.forEach(dbConfig, (value, key) => {
+					setting =  dbConfig[key]
+					if(_.isFunction(settingMulti2[setting.setType])){
+						_log('invoking')
+						_log(setting)
+						_.invoke(settingMulti, setting.setType, setting.key, setting.defaultValue)
+					}
+				})
+
+				return settingMulti.exec()
+					.then(results => {
+					console.log('resultsss')
+						console.log(results)
+
+						if(_.isEmpty(results) || results[0][0]){
+							console.log(results)
+							throw new Error('Invalid Server Config')
+						}
+
+						const settingMulti3 = settingsClient.multi()
+
+						_.forEach(dbConfig, (value, key) => {
+							setting =  dbConfig[key]
+							if(_.isFunction(settingMulti3[setting.getType])){
+								_.invoke(settingMulti3, setting.getType, setting.key)
+							}
+						})
+						return settingMulti3.exec()
+					})
 			}
+
+			return configs
+		})
+		.then((configs) => {
+
+
+			if(_.isEmpty(configs) || configs[0][0] || configs[0][1] === null){
+				throw new Error('Invalid Server Config')
+			}
+
+			serverConfig = {}
+
+			_.forEach(configs, ([err, value], key) => {
+				const configName = dbConfig[key].config
+				serverConfig[configName] = value
+			})
 
 			//update global var
 			globals.setVariable("SERVER_CONFIG", serverConfig)
-
 			return serverConfig
 		})
+		.catch((err) => {
+			console.log('[Error] ServerConfig', err)
+		})
+
 }
 
 module.exports = scripts

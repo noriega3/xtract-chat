@@ -2,6 +2,8 @@
 require('./utils/helpers')
 
 //npm/node modules
+const _   		= require('lodash')
+const Arena   	= require('bull-arena') //https://github.com/bee-queue/arena
 const cluster   = require('cluster')
 const net       = require('net')      //https://nodejs.org/api/net.html
 const debug     = require('debug') //https://github.com/visionmedia/debug
@@ -24,7 +26,6 @@ redisManager.newQueue('roomUpdateQueue')	//handles room updates (like a constant
 redisManager.newQueue('roomQueue')			//handles all general room events
 redisManager.newQueue('botsQueue')		//handles all bot events
 
-
 //These connect redis and the socket together
 const ClientBridge      	= require('./_client/node_pubsub_bridge') //extracts the message from the tcp socket, and directs to whereever.
 require('./_client/redis_pubsub_bridge') //listens for pubsub messages sent to redis
@@ -38,6 +39,7 @@ const util 				= require("./utils/helpers")
 const Sockets           = globals.sockets
 const SERVER_NAME       = globals.getVariable("SERVER_NAME")
 const TCP_PORT          = globals.getVariable("TCP_PORT")
+const configClient  	= globals.getVariable("REDIS_CLIENT")
 
 //Debug
 let _logserver, _log
@@ -101,8 +103,12 @@ const _onNodeClose = (exitCode) => {
 	const sendMessage = () => Sockets.writeToAllSockets(JSON.stringify({
 			"phase": "disconnected",
 			"room": "Server",
+			"serverTime": Date.now(),
 			"message": "Server shutting down.",
-			"response": {"sessionId": "server"}
+			"response": {
+				"serverTime": Date.now(),
+				"sessionId": "server"
+			}
 		}))
 
 	return Promise.all([sendMessage, closeQueue, closeNode])
@@ -155,29 +161,70 @@ node_server.on('listening', () => {
 	}
 
 	_logserver("[Server] Listening on port: %s %s %s %s", properties.address, properties.port, properties.family, SERVER_NAME)
+
+	Arena({
+		"queues": [
+			{
+				"name": "tickerQueue",
+				"host": configClient.host,
+				"port": configClient.port,
+				"password": configClient.password,
+				"hostId": "server:blue",
+			},
+			{
+				"name": "sessionQueue",
+				"host": configClient.host,
+				"port": configClient.port,
+				"password": configClient.password,
+				"hostId": "server:blue",
+			},
+			{
+				"name": "roomQueue",
+				"host": configClient.host,
+				"port": configClient.port,
+				"password": configClient.password,
+				"hostId": "server:blue",
+			},
+			{
+				"name": "botsQueue",
+				"host": configClient.host,
+				"port": configClient.port,
+				"password": configClient.password,
+				"hostId": "server:blue",
+			},
+		]}, {})
+
 })
 
 //Load the latest server configs before starting server
 _logserver('[Server Configs]: Start Update')
 ServerActions.updateServerConfig()
 	.then((serverConfig) => {
+
+		if(_.keys(serverConfig).length === 0){
+			const err = new Error('SETTINGS ARE NOT FILLED IN, EITHER IT IS EMPTY OR IT GOT ERASED VIA REDIS MEMORY MANAGEMENT')
+			console.error(err.message)
+			throw err
+		}
+
 		_logserver('[Server Configs]: Update Finished \n%O', serverConfig)
 		util.setLoadPercent(10)
 		node_server.listen(TCP_PORT, '::') //Set server to listen on specified port
+
+		/**
+		 * Server is receiving a new client connection send to pubsub_sessions
+		 * @see pubsub_sessions
+		 */
+		node_server.on('connection', (socket) => new ClientBridge(socket))
+
+		process.stdin.resume()
+
 	})
 	.catch((err) => {
 		_logserver("[Error]: On Config\n%s", err.toString())
 		process.exit(1)
 	})
 
-
-/**
- * Server is receiving a new client connection send to pubsub_sessions
- * @see pubsub_sessions
- */
-node_server.on('connection', (socket) => new ClientBridge(socket))
-
-process.stdin.resume()
 
 //If the process is exiting
 process.on('exit', _onNodeClose)
@@ -197,7 +244,3 @@ process.on('uncaughtException', (err) => {
 	console.log(err, err.stack.split("\n"))
 	process.exit(1)
 })
-
-
-
-

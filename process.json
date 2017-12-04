@@ -13,23 +13,25 @@
             "max_restarts"      : 10,
             "vizion"            : false,
             "wait_ready"        : true,
-            "node_args"         : ["--harmony", "--max_old_space_size=500", "--trace-warnings", "--trace-deprecation", "--inspect=9090"],
+		  "node_args"         : ["--harmony", "--max_old_space_size=512", "--trace-warnings", "--trace-deprecation", "--inspect=9090"],
             "env": {
-                "NODE_DEBUG": "*,-not_this,-ioredis:*,-redis_ps_bridge",
+                "NODE_DEBUG": "*,-not_this,-ioredis:*",
                 "NODE_ENV": "development",
-                "DEBUG": "*,-not_this,-ioredis:*,-redis_ps_bridge",
-			  	"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
+                "DEBUG": "*,-not_this,-ioredis:*",
+			  	"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+	  		 	"PORT": 7776
             },
             "env_staging": {
-              "NODE_DEBUG": "bull,*,-not_this,-ioredis:*",
+			  "NODE_DEBUG": "*,-not_this,-ioredis:*",
               "NODE_ENV": "staging",
-              "DEBUG": "*,-not_this,-ioredis:*",
-			  "PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
+			  "DEBUG": "*,-not_this,-ioredis:*",
+			  "PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+			  "PORT": 8888
 			},
             "env_production": {
                 "NODE_ENV": "production",
-			  	"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
-
+			  	"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+	   		  	"PORT": 7777
 			}
         },
         {
@@ -43,26 +45,43 @@
             "restart_delay"     : 3000,
             "listen_timeout"    : 4000,
             "max_restarts"      : 10,
-            "vizion"            : false,
+		  "vizion"            : false,
 		  	"wait_ready"        : true,
-		  	"node_args"         : ["--harmony", "--max_old_space_size=500"],
+		  	"node_args"         : ["--harmony", "--max_old_space_size=512"],
             "env": {
                   "NODE_DEBUG": "bull",
                   "NODE_ENV": "development",
                   "DEBUG": "*,-not_this,-ioredis:redis,-express:*,-body-parser:*",
-				  "PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
+				  "PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+				  "PORT": 8080
 			},
               "env_staging": {
-                "NODE_DEBUG": "bull,*,-not_this,-ioredis:*,-express:*,-body-parser:*",
+				"NODE_DEBUG": "bull",
+				"DEBUG": "*,-not_this,-ioredis:redis,-express:*,-body-parser:*",
                 "NODE_ENV": "staging",
-                "DEBUG": "*,-not_this,-ioredis:*",
-				"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
-
+				"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+				"PORT": 6655
 			  },
               "env_production": {
               	"NODE_ENV": "production",
-				"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000
+				"PM2_GRACEFUL_LISTEN_TIMEOUT": 4000,
+				"PORT": 1010
 			  }
-        }
+        },
+		{
+		  "name"              : "redsmin-connector",
+		  "script"            : "redsmin",
+		  "watch"             : false,
+		  "exec_mode"         : "cluster",
+		  "instances"         : 1,
+		  "autorestart"       : true,
+		  "kill_timeout"      : 4000,
+		  "restart_delay"     : 3000,
+		  "max_restarts"      : 10,
+		  "vizion"            : false,
+		  "env": {
+			"REDSMIN_KEY": "xxxxx" //TODO: change
+		  }
+		}
     ]
 }

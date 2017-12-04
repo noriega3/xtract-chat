@@ -1,3 +1,5 @@
+local _tonumber = tonumber
+
 local rk = {
     tickSessions            = "tick|sessions",
     session                 = "sessions|"..KEYS[1],
@@ -6,7 +8,7 @@ local rk = {
 }
 
 local sessionId             = KEYS[1]
-local currentTime           = redis.call('get', 'serverTime')
+local currentTime           = _tonumber(redis.call('get', 'serverTime'))
 
 if(not currentTime) then
 	return redis.error_reply('NO SERVERTIME')

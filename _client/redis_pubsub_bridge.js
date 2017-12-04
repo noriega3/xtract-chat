@@ -1,7 +1,6 @@
-
 const debug         = require('debug') //https://github.com/visionmedia/debug
 const Promise       = require('bluebird')
-const _log          = debug('redis_ps_bridge')
+const _log          = debug('ps_bridge')
 const _error        = debug('ps_redis_err')
 const globals       = require('../globals')
 const helper       = require('../utils/helpers')
@@ -16,22 +15,23 @@ Subscriber.psubscribe('sessions|*','rooms|*','bot|*')
 Subscriber.on('pmessage', (pattern, channel, message) => {
 
 	const parsed = message && helper._isJson(message) ? JSON.parse(message) : {}
-
+	const dateInSeconds = Date.now() / 1000
 
 	if(pattern === 'rooms|*'){
-
-		_log('json roomms', message)
 
         if(helper._isObject(parsed) && parsed.sessionIds && parsed.sessionIds.length > 0) {
 			const sessionIds = parsed.sessionIds
 			let fullMessage = ""
 
+
         	if(parsed.messages){
+
 				//TODO: fix the buffer max
 				//multiple messages
 				Promise.map(parsed.messages, (msg) => {
-					_error(msg)
 
+					//add serverTime to response
+					msg.serverTime = dateInSeconds
 
 					fullMessage = "__JSON__START__"+JSON.stringify(msg)+"__JSON__END__"
 					//Sends the message to the appropriate socket on the appropriate server that has the sessionid
@@ -41,7 +41,7 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 
 							return Sockets.writeToSocket(socket, fullMessage).then((result) => {
 								if(result === 'undefined'){
-									_log('bad socket', socket.sessionId)
+									_error('bad socket', socket.sessionId)
 								}
 								return result
 							})
@@ -52,7 +52,7 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 				})
 
 			} else if(parsed.message){
-				_log('json single message', parsed.message)
+				parsed.message.serverTime = dateInSeconds
 
         		const dataToSend = JSON.stringify(parsed.message)
 
@@ -66,17 +66,9 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 
 						return Sockets.writeToSocket(socket, fullMessage).then((result) => {
 							if(result === 'undefined'){
-								_log('bad socket', socket.sessionId)
+								_error('bad socket', socket.sessionId)
 							}
 							return result
-						}).tap((result) => {
-							_log('-------------')
-							_log('[Session]: %s', socket.sessionId)
-							_log('[Pattern]: %s', pattern)
-							_log('[Channel]: %s', channel)
-							_log('[Result]: %s', result)
-							_log('#-------------')
-
 						})
 					})
 					.then((results) => {
@@ -90,30 +82,33 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
     }
 
     if(pattern === 'sessions|*'){
-		_log('json sessions', message)
-
-
 		if(helper._isObject(parsed) && parsed.sessionId) {
             const sessionId = parsed.sessionId
             const parsedMsg = parsed.message
 
-            if(parsedMsg && parsedMsg.serverReqTime){
-                parsedMsg.serverLatency = (Date.now() - parsedMsg.serverReqTime)
-            }
-            const message = JSON.stringify(parsedMsg)
+			if(parsedMsg){
+				parsedMsg.serverTime = dateInSeconds
 
-			_log('-------------')
-			_log('[Pattern]: %s', pattern)
-			_log('[Channel]: %s', channel)
-			_log('[Message]: %s', message)
-			_log('[Phase]: %s', parsed.message.phase)
-			_log('#-------------')
+				if(parsedMsg.serverReqTime){
+					parsedMsg.serverLatency = (Date.now() - parsedMsg.serverReqTime)
+				}
+			}
+			const message = JSON.stringify(parsedMsg)
+
+			if(parsed.message.phase && parsed.message.phase !== "pong") {
+				_log('-------------')
+				_log('[Pattern]: %s', pattern)
+				_log('[Channel]: %s', channel)
+				_log('[Message]: %s', message)
+				_log('[Phase]: %s', parsed.message.phase)
+				_log('#-------------')
+			}
 
             //Sends the message to the appropriate socket on the appropriate server that has the sessionid
             Promise.resolve(Sockets.writeToSessionId(sessionId, "__JSON__START__" + message + "__JSON__END__"))
                 .then((result) => {
                     if(result === 'undefined') {
-                        _log('bad socket', socket.sessionId)
+						_error('bad socket', socket.sessionId)
 
                     }
                 })
@@ -128,9 +123,6 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 		_log('[Message]: %s', message)
 		_log('#-------------')
 
-		_log('json bot', message)
-
-
 		if(helper._isObject(parsed) && parsed.sessionId) {
 			const sessionId = parsed.sessionId
 
@@ -141,7 +133,7 @@ Subscriber.on('pmessage', (pattern, channel, message) => {
 			)
 				.then((result) => {
 					if(result === 'undefined') {
-						_log('bad socket', socket.sessionId)
+						_error('bad socket', socket.sessionId)
 
 					}
 				})

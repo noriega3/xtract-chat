@@ -28,10 +28,6 @@ const addConfig = {
 }
 sessionQueue.setMaxListeners(0)
 
-const _getTime = () => {
-    return new Date().getUTCMilliseconds()
-}
-
 const _validatePlayerData = (data) => {
     return data
 }
@@ -61,15 +57,23 @@ sessionQueue.process('init',(job) => {
     let roomList
 	job.progress(25)
 
-	_log('INIT SERVER TIME', serverTime)
+	//Hook in single app user check
+    return sessionQueue.add('sendSsoCheck', {
+			sessionId: sessionId,
+			appName: appName,
+			userId: userId
+		}, {...addConfig})
+		.then((nestedJob) => nestedJob.finished())
 
-    return client.initSession(sessionId, objSessionData)
+		//normal init function
+		.then(() => client.initSession(sessionId, objSessionData))
+
 		.tap((result) => _log('[INIT] Setup', result.toString()))
 
 		.then((rooms) => {
 			job.progress(50)
 			roomList = helper._arrToSet(rooms)
-            return roomSubQueue.add('subscribe', {
+            return roomQueue.add('subscribe', {
                 sessionId: sessionId,
                 rooms: roomList,
                 userId: userId,
@@ -130,7 +134,8 @@ botsQueue.process((job) => {
 	const intent 	= data.intent
 	const roomName 	= data.roomName
 	const roomType 	= data.roomType
-	_error('bots queue process', intent, roomName)
+	const roomGame 	= data.roomGame
+	const roomTheme = data.roomTheme
 
 	let findBotCommand = () => {
 		switch (intent) {
@@ -139,23 +144,21 @@ botsQueue.process((job) => {
 			case 'removeAll':
 				return roomActions.removeAllBotsFromRoom(roomName)
 			case 'add':
-				return roomActions.addBotToRoom(roomName, roomType)
+				return roomActions.addBotToRoom(roomName, roomType, roomGame, roomTheme)
 		}
 	}
 
 	//process bot command
 	return findBotCommand(intent)
-		.then((result) => {
-			_log('result', result)
-			return 'OK'
-		})
-		.catch((err) => {
-			_error('[Error] @ botQ', err)
-			throw new Error('Error '+ err.toString())
+		.tap((result) => _log('[BOT] Command', result.toString()))
+		.then(() => 'OK')
+		.tapCatch((err) => {
+			_error('[ERROR BOT]' + err.status, err.message)
+			console.log(err, err.stack.split("\n"))
 		})
 })
 
-sessionQueue.process('keepAlive', (job,) => {
+sessionQueue.process('keepAlive', (job) => {
     const data = job.data
     const sessionId = data.sessionId
     const params = JSON.stringify(data.params) || {}
@@ -171,15 +174,52 @@ sessionQueue.process('keepAlive', (job,) => {
     })
 })
 
+sessionQueue.process('sendSsoCheck', (job) => {
+	const data = job.data
+	const sessionId = data.sessionId
+	const userId = data.userId
+	const appName = data.appName
+
+	return client.sendSsoCheck(userId, sessionId, appName)
+		.then((result) => {
+			_log('sendsso', result)
+			return 'OK'
+		})
+		.catch((err) => {
+			_error('[Error sendSsoCheck]', err)
+			throw new Error('Error '+ err.toString())
+		})
+})
+
+
+sessionQueue.process('verifySsoCheck', (job) => {
+	const data = job.data
+	const sessionId = data.sessionId
+	const rawMessage = data.rawMessage
+
+	return client.verifySsoCheck(sessionId, rawMessage)
+		.then((result) => {
+			_log('r', result)
+
+			return 'OK'
+		})
+		.catch((err) => {
+
+			_log('WOULD LOG OUT HERE')
+/*			return sessionQueue.add('destroy', {sessionId: sessionId, destroyType: 'expired'}, addConfig)
+				.then((nestedJob) => nestedJob.finished())
+				.then((nestedJobResult) => sessionId)
+				.catch((err) => 'OK')*/
+
+			_error('[Error verifySsoCheck]', err)
+			throw new Error('Error '+ err.toString())
+		})
+})
+
 //Run an expire check every second
 sessionQueue.process('expireCheck', (job) => {
-	_log('expire check')
-
     return client.getServerTime().then((serverTime) => client.zrangebyscore('tick|sessions', 0, serverTime-60000, 'LIMIT', 0, 10))
         .map((sessionId) => {
-		console.log('in map')
-            console.log('[Expired Session]: ' + sessionId)
-
             return sessionQueue.add('destroy', {sessionId: sessionId, destroyType: 'expired'}, addConfig)
                 .then((nestedJob) => nestedJob.finished())
                 .then((nestedJobResult) => sessionId)
@@ -195,16 +235,25 @@ sessionQueue.process('expireCheck', (job) => {
 		})
 })
 
-sessionQueue.isReady().then(() => {
-	roomActions.updateServerTime()
-	//sessionQueue.add('expireCheck', {}, {repeat: { cron: '*/5 * * * * *'}, removeOnComplete: true})
+/*sessionQueue.isReady().then(() => {
+	return roomActions.updateServerTime()
+	//sessionQueue.add('expireCheck', {}, {repeat: { cron: '*!/5 * * * * *'}, removeOnComplete: true})
+})*/
+
+client.defineCommand('sendSsoCheck', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/session/sendSsoCheck.lua", "utf8")
+})
+
+client.defineCommand('verifySsoCheck', {
+	numberOfKeys: 2,
+	lua: fs.readFileSync("./scripts/redis/session/verifySsoCheck.lua", "utf8")
 })
 
 client.defineCommand('publishToSession', {
 	numberOfKeys: 2,
 	lua: fs.readFileSync("./scripts/redis/session/publishToSession.lua", "utf8")
 })
-
 
 client.defineCommand('validateAuths', {
     numberOfKeys: 1,
@@ -213,12 +262,12 @@ client.defineCommand('validateAuths', {
 
 client.defineCommand('keepAlive', {
     numberOfKeys: 1,
-    lua: fs.readFileSync("./scripts/events/keepAlive.lua", "utf8")
+    lua: fs.readFileSync("./scripts/redis/session/keepAlive.lua", "utf8")
 })
 
 client.defineCommand('initSession', {
     numberOfKeys: 1,
-    lua: fs.readFileSync("./scripts/redis/initSession.lua", "utf8")
+    lua: fs.readFileSync("./scripts/redis/session/initSession.lua", "utf8")
 })
 
 sessionQueue.on('error', function(job, err){
