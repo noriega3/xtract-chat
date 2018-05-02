@@ -1,0 +1,13 @@
+{
+ "env":{
+		"mocha": true
+	},
+	"rules": {
+		"chai-friendly/no-unused-expressions": 2,
+		"mocha/no-exclusive-tests": "error"
+	},
+	"plugins": [
+		"chai-friendly",
+		"mocha"
+	]
+}

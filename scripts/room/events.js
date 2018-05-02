@@ -1,24 +1,17 @@
-'use strict'
+"use strict"
 
-const fs = require("fs")
 const Promise       = require('bluebird') //https://github.com/visionmedia/debug
-const debug         = require('debug')      //https://github.com/visionmedia/debug
-const _log          = debug('events_room')
-const globals       = require('../../globals')
-const redisManager  = require('../redis_manager')
-const client        = redisManager.client
-const roomQueue     = redisManager.roomQueue
-
-let prepareList = {}
+const store			= require('../../store')
+let eventList = {}
 
 /**
  * List of functions that prepare the event
  */
 
-prepareList._groupWin = (sessionId, params) => {
-    const config = globals.getVariable("SERVER_CONFIG").roomEvents
-    const minPayout    = parseInt(config["groupWin:minPayout"])
-    const maxPayout    = parseInt(config["groupWin:maxPayout"])
+eventList._groupWin = (sessionId, params) => {
+    const roomEvents	= store.getConfig('roomEvents')
+    const minPayout    = parseInt(roomEvents["groupWin:minPayout"])
+    const maxPayout    = parseInt(roomEvents["groupWin:maxPayout"])
 
     let total = params.totalAmountWon * params.betAmount
     let totalAmountWon = Math.floor((total * .25) / 25) * 25
@@ -36,10 +29,13 @@ prepareList._groupWin = (sessionId, params) => {
 /**
  * This is after the event has been verified, and messages have been sent out from the prepare list
  */
-
-roomQueue.process('groupWin', (job, done) => {
-    //verifies an eventId for room queue processing.
-    done()
-})
-
-module.exports = prepareList
+const attach = (queue) => {
+	queue.process('groupWin', (job, done) => {
+		//verifies an eventId for room queue processing.
+		done()
+	})
+}
+module.exports = {
+	attach,
+	...eventList
+}

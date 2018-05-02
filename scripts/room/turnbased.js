@@ -1,39 +1,36 @@
 "use strict"
 const fs            = require('fs') //https://github.com/visionmedia/debug
 const debug         = require('debug') //https://github.com/visionmedia/debug
-const cluster       = require('cluster')
-const Promise       = require('bluebird')
-const gcm			= require('node-gcm')
 const _log          = debug('queue_ps_rooms')
-const globals       = require('../../globals')
-const helper          = require('../../utils/helpers')
-const redisManager  = require('../../scripts/redis_manager')
-const client        = redisManager.client
-const notifier		= new gcm.Sender(***REMOVED***);
+const helper          = require('../../util/helpers')
+const store			= require('../../store')
+const db = store.database
 const turnBased = {}
-
-// Set up the sender with you API key
-
 
 turnBased.processEvent = (sessionId, room, params) =>{
 	const eventName = params.event
 
 	switch(eventName){
-		case 'optIn':
-			return client.setMatchOptInSession(room, sessionId)
-		case 'optOut':
-			return client.setMatchOptOutSession(room, sessionId)
-		case 'takeTurn':
-			return client.setMatchTakeTurn(room, sessionId, params)
+		case 'setOptIn':
+			if(!params.seatProps) throw new Error('NO OPT IN PROPS')
+			return db.call('setMatchOptInSession', [room, sessionId, JSON.stringify(params)])
+		case 'setOptOut':
+			return db.call('setMatchOptOutSession', [room, sessionId, JSON.stringify(params)])
+		case 'setMatchTakeTurn':
+			return db.call('setMatchTakeTurn', [room, sessionId, JSON.stringify(params)])
+		case 'setMatchProp':
+			return db.call('setMatchProp', [room, sessionId, JSON.stringify(params)])
+		case 'setSeatProps':
+			return db.call('setMatchSeatProps', [room, sessionId, JSON.stringify(params)])
 		default:
 			return false
 	}
 }
 
-turnBased.processTickEvent = (room, serverTime, nextMessageId) =>{
-
+turnBased.processTickEvent = (room) =>{
 	let roomArr = JSON.stringify(helper._roomNameToArr(room))
 	const matchStateKey = helper._bar('rooms', room, 'matchState')
+	let client = db.createConnection('turnBasedTick')
 
 	return client.lindex(matchStateKey, 0)
 		.then((matchState) => {
@@ -41,8 +38,6 @@ turnBased.processTickEvent = (room, serverTime, nextMessageId) =>{
 
 				switch(matchState){
 
-					case 'NEW_MATCH':
-						return client.setNewMatch(room)
 					case 'OPT_IN': //GPGS - AUTO_MATCHING
 						return client.checkMatchOptIns(room)
 					case 'ACTIVE':
@@ -51,7 +46,7 @@ turnBased.processTickEvent = (room, serverTime, nextMessageId) =>{
 						return client.destroyTurnBasedGameRoom(room,roomArr)
 					case 'COMPLETE':
 						//period where user waits until opt in begins.
-						return client.setMatchComplete(room)
+						return client.setNewMatch(room, true)
 					default:
 						return room
 				}
@@ -61,15 +56,20 @@ turnBased.processTickEvent = (room, serverTime, nextMessageId) =>{
 				return room
 			}
 		})
-		.tap((results) => _log('[Results]', results))
-		.then((results) => client.publishMatchUpdate(room))
+		//.tap((results) => _log('[Results]', results))
+		.then((results) => client.publishTurnBasedUpdate(room))
+		/*.finally(() => client.quit())*/
+		//.tap((results) => _log('[Results]', results))
 }
 
 
 
-turnBased.findNotifyTokenBySessionId = (sessionId) => client.hget(helper._bar('sessions', sessionId), 'notifyDeviceToken')
+turnBased.findNotifyTokenBySessionId = (sessionId) => {
+	return db.call('hget',[helper._bar('sessions', sessionId), 'notifyDeviceToken'])
+}
 
 turnBased.sendNotifyToRoom = (room, message) => {
+	const client = db.createConnection('sendNotifyToRoom')
 	let multi = client.multi()
 	return client.hexSearch('hex|sessions:rooms', true, 'ops', room, 'is-sub-of')
 		.map((sessionId) => {
@@ -85,6 +85,7 @@ turnBased.sendNotifyToRoom = (room, message) => {
 				else _log(response)
 			})
 		})
+		/*.finally(() => client.quit())*/
 		.catch((err) => {
 			_log('error on send notify')
 			return err.toString()
@@ -97,12 +98,12 @@ turnBased.sendNotifyToRoom = (room, message) => {
 turnBased.getMatchState = (roomName) => {
 	const roomInfoKey = helper._bar('rooms', roomName, 'info')
 	_log('match state', roomInfoKey)
-	return client.hget(roomInfoKey, 'gameState')
+	return db.call('hget',[roomInfoKey, 'matchState'])
 }
 turnBased.getMatchData = (roomName) => {
 	const roomInfoKey = helper._bar('rooms', roomName, 'info')
 	_log('matchdata', roomInfoKey)
-	return client.hgetall(roomInfoKey)/*, 'gameState', 'gameHash', 'gamePlayers', 'playerTurn', 'gamesPlayed')*/
+	return db.call('hgetall',[roomInfoKey]) /*, 'gameState', 'gameHash', 'gamePlayers', 'playerTurn', 'gamesPlayed')*/
 }
 turnBased.setMatchState = (roomName, state) => {
 	//AUTO_MATCHING, ACTIVE, COMPLETE, CANCELLED, EXPIRED
@@ -139,50 +140,5 @@ turnBased.receiveTurnData = (roomName, data) => {
 
 }*/
 
-
-client.defineCommand('takeTurn', {
-	numberOfKeys: 3,
-	lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/takeTurn.lua", "utf8")
-})
-
-client.defineCommand('setMatchOptInSession', {
-	numberOfKeys: 2,
-	lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/setMatchOptInSession.lua", "utf8")
-})
-
-client.defineCommand('setMatchOptOutSession', {
-	numberOfKeys: 2,
-	lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/setMatchOptOutSession.lua", "utf8")
-})
-
-client.defineCommand("checkMatchActive", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/checkMatchActive.lua", "utf8")
-})
-
-client.defineCommand("checkMatchOptIns", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/checkMatchOptIns.lua", "utf8")
-})
-
-client.defineCommand("publishMatchUpdate", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/publishMatchUpdate.lua", "utf8")
-})
-
-client.defineCommand("setMatchComplete", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/setMatchComplete.lua", "utf8")
-})
-
-client.defineCommand("setNewMatch", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/setNewMatch.lua", "utf8")
-})
-
-client.defineCommand("setMatchTakeTurn", {
-	numberOfKeys: 1,
-	lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/setNextTurn.lua", "utf8")
-})
 
 module.exports = turnBased

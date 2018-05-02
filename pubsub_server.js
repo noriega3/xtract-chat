@@ -1,64 +1,65 @@
-//Inits, not used on this file
-require('./utils/helpers')
-
-//npm/node modules
-const _   		= require('lodash')
-const Arena   	= require('bull-arena') //https://github.com/bee-queue/arena
-const cluster   = require('cluster')
-const net       = require('net')      //https://nodejs.org/api/net.html
+"use strict"
 const debug     = require('debug') //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
+const _log = debug('pubSub')
+const _error = debug('pubSub:err')
 
-//Classes
-const Promise 				= require('bluebird') //http://bluebirdjs.com/docs/api-reference.html
-const EventEmitter 			= require('events')
-const redisManager  		= require('./scripts/redis_manager')
+process.title = 'node_pubsub_server'
 
-//Redis Queues
-redisManager.newQueue('sessionQueue')		//handles all session related events (TODO: separate like room queue below)
+const printMemoryUsage = require('./util/printMemoryUsage')
+//optimizing:
+//log types, move to use util
+//redis/sessions have their own message queue
 
-redisManager.newQueue('tickerQueue')		//handles a tick of the server
+//TODO: v3 will use redis modules written in C to eliminate repeated lua scripting and actually reference other scripts
+//https://redislabs.com/blog/writing-redis-modules/
 
-redisManager.newQueue('roomSubQueue') 		//handles sub/unsubs
-redisManager.newQueue('roomChatQueue') 		//handles chat messages
-redisManager.newQueue('roomGameEventQueue') //handles all general game events) sent to a room
-redisManager.newQueue('roomUpdateQueue')	//handles room updates (like a constant message to  sent to a room
-redisManager.newQueue('roomQueue')			//handles all general room events
-redisManager.newQueue('botsQueue')		//handles all bot events
+// Borrowing from Unix,
+// Node.js encourages composing the complex and powerful out of smaller, simpler pieces.
+// This idea trickles down from entire applications (using the best tool for the job vs. a full suite) to how the tools themselves are built.
 
-//These connect redis and the socket together
-const ClientBridge      	= require('./_client/node_pubsub_bridge') //extracts the message from the tcp socket, and directs to whereever.
-require('./_client/redis_pubsub_bridge') //listens for pubsub messages sent to redis
+// http://thenodeway.io/introduction/#dont-get-carried-away
+// Only build modules as needed. If there is a tangible benefit to splitting code off into a new module
+// (ex: someone else might like to use it, this will make my code cleaner, etc) then by all means go ahead. Just remember: the end-goal is always simpler code, and not just a greater number of smaller files.
 
-const ServerActions  		= require('./scripts/server/server-scripts') //server side getters/setters for server settings
-const RoomActions			= require('./scripts/room/shared') //getters and setters for rooms
 
-//Our stuff
-const globals           = require('./globals')
-const util 				= require("./utils/helpers")
-const Sockets           = globals.sockets
-const SERVER_NAME       = globals.getVariable("SERVER_NAME")
-const TCP_PORT          = globals.getVariable("TCP_PORT")
-const configClient  	= globals.getVariable("REDIS_CLIENT")
+//TODO: instead of eventIds, implement checksum logic like blockchain/file verifications
+//TODO: normalize '' and "" places (use '') as the default
 
-//Debug
-let _logserver, _log
+//npm/node modules
+const Promise 	= require('bluebird') //http://bluebirdjs.com/docs/api-reference.html
 
-if(cluster.isWorker){
-	_log 		= debug(SERVER_NAME+":"+cluster.worker.id)
-	_logserver	= debug('node_server:'+cluster.worker.id)
-	_logserver('[WORKER ID]:', cluster.worker.id)
-} else {
-	_log 		= debug(SERVER_NAME)
-	_logserver	= debug('node_server')
-}
-_logserver("[Starting] %s", SERVER_NAME)
+const store	= require('./store')
+store.createStore()
+const database = store.database
+const getConnection = store.database.getConnection
+const queues = store.queues
+
+//queues
+require('./eventQueue/BotEventQueue')()
+require('./eventQueue/RoomEventQueue')()
+require('./eventQueue/SessionEventQueue')()
+require('./eventQueue/TickEventQueue')()
+
+//servers
+const TcpServer = require('./server/TcpServer')()
+//const WebSocketProxyServer 	= require('./server/WebSocketServer')({port: process.env.WS_PORT, path: process.env.WS_PATH})
+
+require('./adapters/RedisMessageBridge') //transports redis published messages to appropriate tcp socket(s)
+require('./scripts/room/shared') //getters and setters for rooms
+const serverScripts = Promise.promisifyAll(require('./scripts/server'))
 
 /**
+ * Optimizations Needed
+ * ALL Servers
+ * - change redis to connect via unix socket vs tcp (14% faster and relies less on tcp checks causing lag)
+ * - [Breaking change] babel on node js to break out lodash and other stuff (https://github.com/babel/example-node-server)
+ * - compression over send/receive  (https://github.com/expressjs/compression) - or something similar
+ * - ensure parallel#1 - (http://www.monitis.com/blog/top-7-node-js-performance-tips-you-can-adopt-today/)
+ * ===
  * Migration Guide
  * - sync any server times automatically = https://help.ubuntu.com/lts/serverguide/NTP.html
  * currently applied to pubsub prod server/node prod, users prod, dashboard/bots/testing servers,
- *
  * **
  * PubSub Server - 90%
  *  (X) requires node 8.1.x with --harmony flag to enable es2017/es6/es2015 features
@@ -67,180 +68,126 @@ _logserver("[Starting] %s", SERVER_NAME)
  *  (X) system reserved rooms separated from normal rooms
  *  (X) reservation server is now part of the pubsub (node) server as with it's own port and therefore scales with.  each node server has its reservation server attached to it
  *  (X) backwards compatible to v1
- *  (-) turn based multiplayer
+ *  (90) turn based multiplayer
  *  (-) turn based multiplayer observers
  *  (X) more reliable realtime multiplayer w/ retries and confirmation of messages (also used in turn based)
  *  (X) scalable out of the box
  *  (X) no longer should need a separate listener
  *  (X) auto add/remove static bots to be be controlled
+ *  (X) add WebSocket clients
  *  (X) streamlined to redis properly without thousands of watches (using lua scripts - recommended way)
- *  (-) removed reliance on users/hooks server to reserve room
+ *  (80) removed reliance on users/hooks server to reserve room
  *     (though we should still use it for others checking other people's rooms for example that aren't connected)
- * Reservation Server - 85%
+ * Http Server - 85%
  *  (X) /reserve
  * 	(X) /reconnect
  * 	(-) /invite
  * 	(-) /invite/confirm
  * 	(-) /info
- * Dashboard API (the web interface) - 10%
+ * Dashboard  (the web interface) - 50%
  * (-) Bot controller
  * (-) Remove Bots from a room
  * (-) Disable Bots completely
+ * (X) WebSocket simulator (remove reliance on constantly running corona)
+ * () Stress tester
+ * (X) Statuses of all servers
+ * (X) Ability to restart all servers
+ * (X) See server logs without ssh
+ * () Edit configuration into text file
  */
+//In Node/io.js most APIs follow a convention of 'error-first, single-parameter' as such:
 
-util.setLoadPercent(0)
-const node_server = net.createServer({ pauseOnConnect: true })
+//process.stdin.resume()
+const _resetDatabaseStore = () => {
+	let withDatabase = store.database.withDatabase
+	return withDatabase((connection) => {
+		return connection.pipeline()
+			.flushdb()
+			.set('serverTime', Date.now())
+			.set('bots|nextId', 50000)
+			.sadd('bots|usernames', "Not You", "Player202020", "player 50", "Android Guy", "Guy", "You")
+			.exec()
+	})
+}
 
-/**
- * Cleanup when server closes
- */
-const _onNodeClose = (exitCode) => {
-
-	_logserver('[On Node Close] Code: %s', exitCode)
-
-	const closeQueue = () => redisManager.destroyQueues()
-	const closeNode = () => node_server.close((err) => { return err ? new Error('failed to close node server '+err.toString()) : true})
-	const sendMessage = () => Sockets.writeToAllSockets(JSON.stringify({
-			"phase": "disconnected",
-			"room": "Server",
-			"serverTime": Date.now(),
-			"message": "Server shutting down.",
-			"response": {
-				"serverTime": Date.now(),
-				"sessionId": "server"
-			}
-		}))
-
-	return Promise.all([sendMessage, closeQueue, closeNode])
-		.then((results) => {
-			process.stdout.write('\033c')
-			process.exit(0)
+const _startServers = (cb) => {
+	return serverScripts.updateServerConfig()
+		.tap((serverConfig) => _log('[Server Configs]: Update Finished', serverConfig))
+		.then(_resetDatabaseStore)
+		.then(TcpServer.start)
+		.tap(() => cb && cb(true))
+		.then((response) => {
+			_log('[Server]: Servers Launched', response)
+			printMemoryUsage('SVROPEN')
+			if (process.send) process.send('ready')
+			return 'OK'
 		})
+		.tapCatch(() => cb && cb(false))
 		.catch((err) => {
-			_logserver("[Error]: On Node Close\n%s", err.toString())
-			exitCode = null
-			process.exit(1)
+			_error('[Error]: On Launching', err)
+			process.exitCode = 1
+			return _closeServers()
 		})
 }
 
-/**
- * Server closed
- * Note: that if connections exist, this event is not emitted until all connections are ended.
- */
-node_server.on('close', () => {
-    _logserver("[Server] Closed on port: %s %s", TCP_PORT, SERVER_NAME)
-    _onNodeClose()
-})
+const _closeServers = (processExit = true) => {
 
-/**
- * Server error
- */
-node_server.on('error', (e) => {
+	return Promise.all([
+			TcpServer.close(),
+			queues.destroyAllQueues(),
+			database.close()
+		])
+		.timeout(10000)
+		.tap((result) => {
+			_log('[Server] Gracefully shut down servers.', result)
+			printMemoryUsage('SVRCLOSE')
+		})
+		.return('OK')
+		.catch((err) => {
+			_log('[Server] Abruptly shutdown servers.\n', err)
+			process.exitCode = 1
+		})
+		.finally(() => {processExit && process.exit()})
 
-    if (e.code === 'EADDRINUSE') {
-		_logserver('[Error]: Address in use, retrying...')
-        setTimeout(() => {
-			node_server.close((err) => {
-				node_server.listen(TCP_PORT, '::')
-			})
-        }, 1000);
-    } else {
-        _logserver("[Error]: General\n%s",e.message)
-        _onNodeClose()
-    }
-})
+}
 
-/**
- * When server can accept connections
- */
-node_server.on('listening', () => {
-	const properties = node_server.address()
-	util.setLoadPercent(100)
-	if(process.send){
-		process.send('ready')
-	}
+const _onUnhandledError = (err) => {
+	_log('[Process Error] Uncaught Exception\n%s', err.toString())
+	console.log(err, err.stack.split('\n'))
+	process.exitCode = 1
+	return _closeServers()
+}
 
-	_logserver("[Server] Listening on port: %s %s %s %s", properties.address, properties.port, properties.family, SERVER_NAME)
+const _onUnhandledRejection = (err) => {
+	_log('[Process Error] unhandledRejection\n%s', err.toString())
+	console.log(err, err.stack.split('\n'))
+	process.exitCode = 1
+	return _closeServers()
+}
+//***************************************************************************//
 
-	Arena({
-		"queues": [
-			{
-				"name": "tickerQueue",
-				"host": configClient.host,
-				"port": configClient.port,
-				"password": configClient.password,
-				"hostId": "server:blue",
-			},
-			{
-				"name": "sessionQueue",
-				"host": configClient.host,
-				"port": configClient.port,
-				"password": configClient.password,
-				"hostId": "server:blue",
-			},
-			{
-				"name": "roomQueue",
-				"host": configClient.host,
-				"port": configClient.port,
-				"password": configClient.password,
-				"hostId": "server:blue",
-			},
-			{
-				"name": "botsQueue",
-				"host": configClient.host,
-				"port": configClient.port,
-				"password": configClient.password,
-				"hostId": "server:blue",
-			},
-		]}, {})
+//process.on('exit', () => _closeServers('exit')) //If the process is exiting
+process.once('SIGINT', ()=>_closeServers('SIGINT')) //Listen for exit events; Catch SIGINT and close server gracefully
+process.once('SIGTERM', ()=>_closeServers('SIGTERM')) //Catch SIGTERM and close server gracefully
+process.once('uncaughtException', _onUnhandledError) //Process any uncaught exceptions
+process.once('unhandledRejection', _onUnhandledRejection)
 
-})
+//***************************************************************************//
 
-//Load the latest server configs before starting server
-_logserver('[Server Configs]: Start Update')
-ServerActions.updateServerConfig()
-	.then((serverConfig) => {
-
-		if(_.keys(serverConfig).length === 0){
-			const err = new Error('SETTINGS ARE NOT FILLED IN, EITHER IT IS EMPTY OR IT GOT ERASED VIA REDIS MEMORY MANAGEMENT')
-			console.error(err.message)
-			throw err
-		}
-
-		_logserver('[Server Configs]: Update Finished \n%O', serverConfig)
-		util.setLoadPercent(10)
-		node_server.listen(TCP_PORT, '::') //Set server to listen on specified port
-
-		/**
-		 * Server is receiving a new client connection send to pubsub_sessions
-		 * @see pubsub_sessions
-		 */
-		node_server.on('connection', (socket) => new ClientBridge(socket))
-
-		process.stdin.resume()
-
-	})
-	.catch((err) => {
-		_logserver("[Error]: On Config\n%s", err.toString())
-		process.exit(1)
-	})
+const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100;
+_log(`[Memory Usage]: ${used} MB`)
 
 
-//If the process is exiting
-process.on('exit', _onNodeClose)
+module.exports = {
+	init: function(cb) {
+		return _startServers(cb)
+	},
+	destroy: function(cb) {
+		return cb(_closeServers())
+	}}
 
-//Listen for exit events
-//Catch SIGINT and close server gracefully
-process.on('SIGINT', _onNodeClose)
+if(!process.env.MOCHA) process.nextTick(_startServers)
+process.stdin.resume()
 
-//Catch SIGTERM and close server gracefully
-process.on('SIGTERM', _onNodeClose)
 
-/**
- * Process any uncaught exceptions
- */
-process.on('uncaughtException', (err) => {
-    _log('[Process Error] Uncaught Exception\n%s', err.toString())
-	console.log(err, err.stack.split("\n"))
-	process.exit(1)
-})
+

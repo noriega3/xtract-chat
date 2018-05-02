@@ -35,8 +35,8 @@
 			}
         },
         {
-            "name"              : "reservation-server",
-            "script"            : "./reservation_server.js",
+            "name"              : "http-server",
+            "script"            : "./http_server.js",
             "watch"             : true,
             "exec_mode"         : "cluster",
             "instances"         : 1,
