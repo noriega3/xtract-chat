@@ -8,7 +8,11 @@ const WebSocket		= require('ws')
 const _log          = debug('wsDashClient')
 const _error        = debug('wsDashClient:err')
 const store			= require('../store')
+
 const get			= require('lodash/get')
+const _isJson = require('../util/isJson')
+const _toJson = require('../util/toJson')
+
 //TODO: reformat to client, nodesocket, socket listener format
 
 const configPath = './ecosystem.config.js'
@@ -48,9 +52,8 @@ const setupSocket = (identifier, ws) => {
 
 	ws.on('message', (req) => {
 		const data = parseLodash(req)
-		const isJSON = helpers._isJson(req)
 
-		if(!data || !isJSON) return intentActions.sendMessage({event: 'data', error:true, response: 'Invalid JSON'})
+		if(!data || !_isJson(req)) return intentActions.sendMessage({event: 'data', error:true, response: 'Invalid JSON'})
 
 		const intent = (data && data.intent) ? data.intent : "error"
 

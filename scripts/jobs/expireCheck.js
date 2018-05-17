@@ -1,4 +1,6 @@
 "use strict"
+let apm = require('elastic-apm-node')
+
 const debug = require('debug')
 debug.log = console.info.bind(console) //one all send all to console.
 const _log = debug('expireCheck')
@@ -10,7 +12,7 @@ const getConnection = store.database.getConnection
 
 const destroy = require('./destroy')
 
-module.exports = (job) => {
+module.exports = function(job){
 	return Promise.using(getConnection(), (client) => {
 		return client.getServerTime()
 			.then((serverTime) => client.zrangebyscore('tick|sessions', 0, serverTime - 60000, 'LIMIT', 0, 10))

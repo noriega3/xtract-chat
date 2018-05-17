@@ -11,9 +11,10 @@ const find    		= require('lodash/find')
 const result    	= require('lodash/result')
 const filter    	= require('lodash/filter')
 const isEqual    	= require('lodash/isEqual')
-const _map    		= require('lodash/map')
 const _has    		= require('lodash/has')
 const _without 		= require('lodash/without')
+const _invokeMap 		= require('lodash/invokeMap')
+const _result 		= require('lodash/result')
 let _queues 		= []
 
 const reset = () => { _queues = [] }
@@ -25,8 +26,7 @@ const getQueues = (idSearch, withoutQueue) => {
 	return result
 }
 
-const addQueue = (Queue) => {
-	let queueName 	= 	result(Queue, 'getName')
+const addQueue = (queueName, Queue) => {
 	console.log('[Queue] Adding', queueName)
 
 	//ensure there is a socket
@@ -52,15 +52,15 @@ const removeQueue = (Queue) => {
 }
 
 const removeQueueByName = (idSearch = '') => {
-	const _queueFound = find(_queues, ({_identifier}) => isEqual(idSearch, _identifier))
+	const _queueFound = find(_queues, (Queue) => isEqual(idSearch, _result(Queue, 'getName')))
 	if(_queueFound) return removeQueue(_queueFound)
 	return false
 }
 
 const getQueueByName = (idSearch) => {
-	const _queueFound = find(_queues, ({_identifier}) => isEqual(idSearch, _identifier))
+	const _queueFound = find(_queues, (Queue) => isEqual(idSearch, _result(Queue, 'getName')))
 	if(_queueFound) return _queueFound.getQueue()
-	_log('queue list', _queues)
+	_log('queue list', _invokeMap(_queues, 'getName'))
 	throw new Error(`Queue not found for ${idSearch}`)
 }
 

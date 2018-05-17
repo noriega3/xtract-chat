@@ -14,6 +14,6 @@ chai.config.truncateThreshold = 10; // disable truncating
 exports.chai = chai;
 exports.assert = chai.assert;
 exports.expect = chai.expect;
-exports.Subscriber = require('../scripts/bots/subscriber')
+exports.Subscriber = require('../scripts/bots/bot')
 
 chai.should()

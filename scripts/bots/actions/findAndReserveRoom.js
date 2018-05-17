@@ -28,9 +28,12 @@ module.exports = function(roomPath, params = {}){
 		json:true,
 		body: dataToSend,
 	}, (err, response, resBody) => {
-		if(_has(resBody, 'error'))
+		if(_has(resBody, 'error') || !_has(resBody, 'response')) {
 			_error('err', resBody)
-		else
+			if(!_has(resBody, 'response'))
+				emitter.emit('error', 'NO RESERVATION')
+		} else {
 			emitter.emit('reservation', resBody.response)
+		}
 	})
 }

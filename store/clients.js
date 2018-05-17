@@ -3,7 +3,6 @@ const remove       	= require('lodash/remove')
 const includes     	= require('lodash/includes')
 const find    		= require('lodash/find')
 const result    	= require('lodash/result')
-const filter    	= require('lodash/filter')
 const isEqual    	= require('lodash/isEqual')
 const debug         = require('debug') //https://github.com/visionmedia/debug
 const _log          = debug('clients')
@@ -13,7 +12,7 @@ let _clients 		= []
 const reset = () => { _clients = [] }
 
 const getClients = (idSearch) => {
-	if(idSearch) return filter(_clients, ({_identifier}) => includes(idSearch, _identifier))
+	if(idSearch) return _clients.filter(({_identifier}) => includes(idSearch, _identifier))
 	else return _clients
 }
 
@@ -57,13 +56,13 @@ const removeClientById = (idSearch = '') => {
 }
 
 const getClientsByIds = (idsToSearch = []) => {
-	const _foundClients = filter(_clients, ({_identifier}) => includes(idsToSearch, _identifier))
+	const _foundClients = _clients.filter(({_identifier}) => includes(idsToSearch, _identifier))
 	if(!_foundClients) return []
 	return _foundClients
 }
 
 const getClientsByServerType = (typeSearch) => {
-	const _foundClients = filter(_clients, ({_type}) => isEqual(typeSearch, _type))
+	const _foundClients = _clients.filter(({_type}) => isEqual(typeSearch, _type))
 	if(!_foundClients) return []
 	return _foundClients
 }

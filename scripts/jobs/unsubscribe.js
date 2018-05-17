@@ -1,94 +1,90 @@
 "use strict"
+let apm = require('elastic-apm-node')
+
 const debug         = require('debug') //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
 const _log          = debug('unsubscribe')
 const _error        = debug('unsubscribe:err')
+
 const Promise		= require('bluebird')
-const store			= require('../../store')
+
 const _isEqual		= require('lodash/isEqual')
-const _has			= require('lodash/has')
+const _includes		= require('lodash/includes')
 const _get			= require('lodash/get')
-const _size			= require('lodash/size')
-const getConnection = store.database.getConnection
-const RoomActions 	= require('../room/shared')
+const _omit			= require('lodash/omit')
+const _isEmpty		= require('lodash/isEmpty')
+const _uniqBy		= require('lodash/uniqBy')
+const _has			= require('lodash/has')
 
-const {
-	formatRoomList,
-	filterRoomTypes,
-	filterValidSubscriptions,
-	sendUnsubscribe
-} = require('../room')
-const getRoomTypeFromParams = require('../../util/getRoomTypeFromParams')
+process.title = _includes(process.title, '/bin/node')? 'node_unsubscribe' : process.title
 
-const roomNameToArr = require('../../util/roomNameToArr')
+const store			= require('../../store')
+const withDatabase 	= store.database.withDatabase
 
-module.exports = (job) => {
-	const data 				= job.data
-	const skipInitCheck 	= data.isInit
-	const sessionId 		= data.sessionId
+const checkSessionState = store.getLua("./scripts/redis2/session/checkSessionState.lua")
 
-	let rawRoomList 		= data.rooms || []
-	let intendedRoom 		= _get(data, 'room', _get(data, 'roomName', false))
-	let intendedRoomParams	= data.params || {}
+const formatRoomList			= Promise.method(require('../room/formatRoomList'))
+const filterValidSubscriptions	= Promise.method(require('../room/filterValidSubscriptions'))
+const unsubToRooms 				= Promise.method(require('../room/unsubToRooms'))
+const getRoomTypeFromParams		= require('../../util/getRoomTypeFromParams')
 
-	//append individual room
-	if(intendedRoom)
-		rawRoomList.push([
-			getRoomTypeFromParams(intendedRoomParams, 'GET'),
-			intendedRoom,
-			intendedRoomParams
-		])
 
-	_log('rawRoomList', rawRoomList)
+module.exports = function(job){
+	const lastDbConnection	= _get(job, 'db')
+	return withDatabase((db) => {
+		const sessionId 		= _get(job, 'data.sessionId')
+		const unsubType			= _get(job, 'data.unsubType', 'normal')
+		const isDestroy			= _isEqual(unsubType, 'destroy')
+		const errorMessage	 	= _isEqual(unsubType, 'error') && _get(job, 'data.error')
+		const skipSessionCheck 	= _get(job, 'data.skipSessionCheck', false) || isDestroy || _isEqual(unsubType, 'error')
+		let roomList 			= _get(job, 'data.rooms', [])
 
-	//check if room list is empty
-	if(rawRoomList.length <= 0) return 'EMPTY'
+		let intendedRoom 		= _get(job, 'data.room', _get(job, 'data.roomName', false))
+		let intendedRoomParams 	= intendedRoom ? _get(job, 'data.params', {}) : false
+		let intendedRoomTypeId 	= intendedRoomParams ? getRoomTypeFromParams(intendedRoomParams, 'GET') : false
 
-	_log('[UNSUB]', rawRoomList)
+		//append individual room
+		if(intendedRoom && intendedRoomParams && intendedRoomTypeId){
+			roomList.push([intendedRoomTypeId, intendedRoom, intendedRoomParams])
+		}
 
-	//TODO: match roomList like subscribe
-	//TODO: - roomList = [[type, roomName, unsubParams],[type, anotherRoomName, unsubParams]]
-	// have type and unsubParams be optional
+		_log('[UNSUB]', roomList)
 
-	//TODO: - roomList = [roomName, anotherRoomName] (currently)
+		//check if room list is empty
+		if(_isEmpty(roomList)) throw new Error("EMPTY ROOM LIST")
 
-	return Promise.using(getConnection(), (client) => {
+		//remove duplicates by name
+		roomList = _uniqBy(roomList, (e) => e[1])
 
 		//Check if session is active
-		return client.checkSessionState(sessionId, Date.now(), JSON.stringify({skipInitCheck}))
-			//.tap((result) => _log('[UNSUB] State', result.toString()))
-			.then(() => formatRoomList(rawRoomList))
-			.tap((result) => _log('[UNSUB] Format Room List', result))
-			.then((roomList) => filterValidSubscriptions([sessionId, roomList])) //required
-			.tap((result) => _log('[UNSUB] Check valid subs', result))
-			.then((roomList) => {
-				if(_size(roomList) <= 0) return 'EMPTY'
+		if(!_has(db, 'checkSessionState')) db.defineCommand('checkSessionState', { numberOfKeys: 2, lua: checkSessionState})
 
-				return Promise.each(roomList, ([roomType,roomName,roomParams]) => {
-					_log('roomType', roomType)
-					_log('roomName', roomName)
-					_log('roomParams', roomParams)
-					let unSubParams = {
-						roomType,
-						...roomNameToArr(roomName)
-					}
-					return client.unSubscribeRoom(sessionId, roomName, Date.now(), JSON.stringify(unSubParams), JSON.stringify(roomParams))
-						.tap(_log)
-						.then(() => client.syncRoomCounts(roomName, Date.now()))
-						.tap(_log)
-						.return('OK')
-						.tap(_log).tapCatch((err) => _error(err)).catch(() => 'error')
-				})
+		return db.checkSessionState(sessionId, Date.now(), JSON.stringify({skipSessionCheck}))
+			.tap((result) => _log('[UNSUB] State', _omit(result, 'db')))
 
-			})
-			.tap((result) => _log('[UNSUB] Unsub', result.toString()))
-	})
-	.return('OK')
-	.catch((err) => {
-		if(_isEqual('EMPTY ROOM LIST', err.message)) return _log('[UNSUB] room list empty, skipping unsubscribe')
-		if(_isEqual('OFFLINE', err.message)) return _log('[SESSION] offline, skipping unsubscribe')
-		_error('[Error Unsubscribe]', err.status, err.message)
-		console.log(err, err.stack.split("\n"))
-		throw new Error(err)
-	})
+			.then(() => Promise.props({formatType: 'unsubscribe', db, sessionId, roomList, intendedRoom, errorMessage}))
+
+			.then(formatRoomList)
+			.tap((result) => _log('[UNSUB] Format Room List', _omit(result, 'db')))
+
+			.then(filterValidSubscriptions) //required
+			.tap((result) => _log('[UNSUB] Check valid subs', _omit(result, 'db')))
+
+			.then(unsubToRooms)
+			.tap((result) => {_log('[UNSUB] TO ROOMS', _omit(result, 'db'))})
+
+			.tapCatch(_error)
+			.then((result) => _omit(result, 'db'))
+
+	}, lastDbConnection)
+		.then((result) => {
+			_log('[UNSUB] DONE', result)
+			return result
+		})
+		.tapCatch((err) => {
+			if(_isEqual('EMPTY ROOM LIST', err.message)) return _log('[UNSUB] room list empty, skipping unsubscribe')
+			if(_isEqual('OFFLINE', err.message)) return _log('[SESSION] offline, skipping unsubscribe')
+			_error('[Error Unsubscribe]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
+		})
 }

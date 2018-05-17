@@ -2,31 +2,13 @@ const fs = require('fs')
 
 const attachRedisCommands = (client) => {
 
-	client.defineCommand('hexAdd', {
-		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/redis2/hexAdd.lua", "utf8")
-	})
-
-	client.defineCommand('hexRem', {
-		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/redis2/hexRem.lua", "utf8")
-	})
-
 	client.defineCommand('hexSearch', {
 		numberOfKeys: 4,
 		lua: fs.readFileSync("./scripts/redis2/hexSearch.lua", "utf8")
 	})
 
-	client.defineCommand('hexExists', {
-		numberOfKeys: 6,
-		lua: fs.readFileSync("./scripts/redis2/hexExists.lua", "utf8")
-	})
-
 	//session actions
-	client.defineCommand('confirmInit', {
-		numberOfKeys: 2,
-		lua: fs.readFileSync("./scripts/redis2/session/confirmInit.lua", "utf8")
-	})
+
 
 	client.defineCommand('sendSsoCheck', {
 		numberOfKeys: 2,
@@ -284,49 +266,49 @@ const attachRedisCommands = (client) => {
 	/** @function client.setMatchProp */
 	client.defineCommand('setMatchProp', {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/redis2/rooms/turnbased/match/setMatchProp.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/setMatchProp.lua", "utf8")
 	})
 
 	/** @function client.setMatchOptInSession */
 	client.defineCommand('setMatchOptInSession', {
 		numberOfKeys: 2,
-		lua: fs.readFileSync("./scripts/redis2/rooms/turnbased/match/setMatchOptInSession.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/setMatchOptInSession.lua", "utf8")
 	})
 
 	/** @function client.setMatchOptOutSession */
 	client.defineCommand('setMatchOptOutSession', {
 		numberOfKeys: 2,
-		lua: fs.readFileSync("./scripts/redis2/rooms/turnbased/match/setMatchOptOutSession.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/rooms/turnbased/match/setMatchOptOutSession.lua", "utf8")
 	})
 
 	/** @function client.checkMatchActive */
 	client.defineCommand("checkMatchActive", {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("scripts/redis2/rooms/turnbased/match/checkMatchActive.lua", "utf8")
+		lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/checkMatchActive.lua", "utf8")
 	})
 
 	/** @function client.checkMatchOptIns */
 	client.defineCommand("checkMatchOptIns", {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("scripts/redis2/rooms/turnbased/match/checkMatchOptIns.lua", "utf8")
+		lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/checkMatchOptIns.lua", "utf8")
 	})
 
 	/** @function client.publishTurnBasedUpdate */
 	client.defineCommand("publishTurnBasedUpdate", {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("scripts/redis2/rooms/turnbased/publishRoomUpdate.lua", "utf8")
+		lua: fs.readFileSync("scripts/redis/rooms/turnbased/publishRoomUpdate.lua", "utf8")
 	})
 
 	/** @function client.setNewMatch */
 	client.defineCommand("setNewMatch", {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("scripts/redis2/rooms/turnbased/match/setNewMatch.lua", "utf8")
+		lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/setNewMatch.lua", "utf8")
 	})
 
 	/** @function client.setMatchTakeTurn */
 	client.defineCommand("setMatchTakeTurn", {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("scripts/redis2/rooms/turnbased/match/setNextTurn.lua", "utf8")
+		lua: fs.readFileSync("scripts/redis/rooms/turnbased/match/setNextTurn.lua", "utf8")
 	})
 
 	/* client side actions */
@@ -334,14 +316,14 @@ const attachRedisCommands = (client) => {
 	/** @function client.publishRoomUpdate */
 	client.defineCommand('publishRoomUpdate', {
 		numberOfKeys: 1,
-		lua: fs.readFileSync("./scripts/redis2/rooms/realtime/publishRoomUpdate.lua", "utf8")
+		lua: fs.readFileSync("./scripts/redis/rooms/realtime/publishRoomUpdate.lua", "utf8")
 	})
 
-	/** @function client.checkIsSubscribed */
+/*	/!** @function client.checkIsSubscribed *!/
 	client.defineCommand('checkIsSubscribed', {
 		numberOfKeys: 2,
 		lua: fs.readFileSync("./scripts/redis2/session/validators/checkIsSubscribed.lua", "utf8")
-	})
+	})*/
 
 	/** @function client.checkRoomTypeMatch */
 	client.defineCommand('checkRoomTypeMatch', {
@@ -354,6 +336,5 @@ const attachRedisCommands = (client) => {
 		numberOfKeys: 1,
 		lua: fs.readFileSync("./scripts/redis2/room/getters/getRoomInfo.lua", "utf8")
 	})
-
 }
 module.exports = attachRedisCommands

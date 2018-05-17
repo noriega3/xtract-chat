@@ -19,7 +19,6 @@ const TCP_SERVER_PORT = process.env.TCP_SERVER_PORT || 7776 //default for 7776 f
 //uses mocha chai
 //uses API for chai - http://chaijs.com/api/
 //Don't use arrow ES6 on mocha (recommended)
-const Subscriber = require('../scripts/bots/subscriber')
 
 const createSocketTest = (name, path) => {
     describe(name, function(){

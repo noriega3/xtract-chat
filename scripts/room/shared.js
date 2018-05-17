@@ -1191,10 +1191,10 @@ shared.checkForGameRoomsAndUnSub = ([sessionId, roomList]) => {
 	}
 }
 
-shared.commandUnSubSession = (client, sessionId, destroyType) => {
+shared.commandUnSubSession = (client, sessionId, unsubType) => {
 	return shared.getSubscriptionsBySessionId([sessionId])
 		.then((roomList) => shared.unSubFromRooms([sessionId, roomList]))
-		.then(() => client.destroySession(sessionId, destroyType))
+		.then(() => client.destroySession(sessionId, unsubType))
 		.tapCatch((err) => _error(err))
 }
 

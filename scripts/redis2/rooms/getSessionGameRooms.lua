@@ -1,9 +1,3 @@
-local rk = {
-    tickSessions            = "tick|sessions",
-    session                 = "sessions|"..KEYS[1],
-    sessionSubs             = "sessions|"..KEYS[1].."|rooms",
-    sessionHistory          = "sessions|"..KEYS[1].."|history",
-}
 local sessionId             = KEYS[1]
 
 local hexSearchObject = function(redisKey, predicate, subject)

@@ -1,11 +1,16 @@
 "use strict"
-const net 			= require('net')
-const request 		= require('request')
 const debug         = require('debug')      //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
 const _log          = debug('bot')
 const _error        = debug('bot:err')
+
+const net 			= require('net')
+
 const _get 			= require('lodash/get')
+
+const _isJson = require('../../util/isJson')
+const _toJson = require('../../util/toJson')
+
 const EventEmitter 	= require('events').EventEmitter
 const helper = require("../../util/helpers")
 const TCP_PORT		= process.env.TCP_SERVER_PORT
@@ -81,6 +86,7 @@ const createSubClient = (data, options) => {
 	_emitter.on('subscribed', _listeners.subscribed)
 	_emitter.on('reservation', _listeners.reservation)
 	_emitter.on('requestDisconnect', _listeners.requestDisconnect)
+	_emitter.on('error', _listeners.requestDisconnect)
 
 
 	// Set up a client and connect to port 31337 (or whatever port you use)
@@ -101,7 +107,7 @@ const createSubClient = (data, options) => {
 	_socket.on('data', (dataRaw) => {
 		if(_state === "disconnecting") return
 
-		console.log('data recieved')
+		console.log('data received')
 
 		//Unlike init, we start from beginning of buffer
 		let jsonStart = dataRaw.indexOf('__JSON__START__')
@@ -110,7 +116,7 @@ const createSubClient = (data, options) => {
 		if (jsonStart !== -1 && jsonEnd !== -1) {
 			let bufStr = dataRaw.toString('utf8', jsonStart + 15, jsonEnd)
 
-			let response = bufStr && helper._isJson(bufStr) ? JSON.parse(bufStr) : {}
+			let response = bufStr && _isJson(bufStr) ? JSON.parse(bufStr) : {}
 			let phase = (response && response.phase) ? response.phase : false
 			let eventId = (response && response.eventId) ? response.eventId : false
 

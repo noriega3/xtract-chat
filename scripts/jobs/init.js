@@ -1,126 +1,138 @@
 "use strict"
+let apm = require('elastic-apm-node')
+
 const debug = require('debug')
 debug.log = console.info.bind(console) //one all send all to console.
-const log = debug('initJob')
-const errlog = debug('initJob:error')
+const _log = debug('initJob')
+const _error = debug('initJob:error')
 
 const Promise  = require('bluebird')
-const _  = require('lodash')
-const sendSsoCheck  = require('./sendSsoCheck')
-Promise.promisifyAll(sendSsoCheck)
-const subscribe  = require('./subscribe')
-const RoomActions 	= require('../room/shared')
-const store  = require('../../store')
-const getConnection  = store.database.getConnection
 
-const colon = require('../../util/colon')
+const _get 		= require('lodash/get')
+const _isEmpty 	= require('lodash/isEmpty')
+const _isString = require('lodash/isString')
+const _omit 	= require('lodash/omit')
+const _clone 	= require('lodash/clone')
+const _isEqual 	= require('lodash/isEqual')
+const _includes = require('lodash/includes')
+
+process.title = _includes(process.title, '/bin/node')? 'node_init' : process.title
+
 const objToArr = require('../../util/objToArr')
 const remapToObject = require('../../util/remapToObject')
 const arrToSet = require('../../util/arrToSet')
-log('created new instance')
-//jobs are independent (outside the server process) so we need to create queues that will destroy after process is finished
-const Queue = require('../queue')
 
-const PUBLISH_DELAY = 3000
+const sendSsoCheck  = Promise.method(require('./sendSsoCheck'))
+const subscribe  	= Promise.method(require('./subscribe'))
+const unsubscribe  	= Promise.method(require('./unsubscribe'))
+
+const store  = require('../../store')
+const withDatabase  = store.database.withDatabase
+
+const publishToSession 	= store.getLua('./scripts/redis2/session/publishToSession.lua')
+const initSession 		= store.getLua('./scripts/redis2/session/initSession.lua')
 
 const _validatePlayerData = (data) => {
-	if(_.isEmpty(data)) throw new Error('[Socket] player data is empty')
+	if(_isEmpty(data)) throw new Error('[Socket] player data is empty')
 	return data
 }
 
 const _validateSessionId = (sessionId) => {
-	if(!_.isString(sessionId)) throw new Error('[Socket] sessionId does not conform to string')
+	if(!_isString(sessionId)) throw new Error('[Socket] sessionId does not conform to string')
 	/*if(/^[0-9A-F]{8}-[0-9A-F]{4}-[5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/.test(_.toUpper(sessionId))) throw new Error('[Socket] sessionId does not conform to uuid')*/
 	return sessionId
 }
 
 if (process.env.FORK) {
-	console.log('started from fork()');
+	_log('started from fork()');
 }
 
 module.exports = function(job){
-	const isWorker = job.worker
-	const roomQueue = Queue('roomQueue')
-	const {sessionId,playerData,timeAddQueue} = job.data
-	const {appName,userId} = playerData
-	const timeStartExec = Date.now()
-	const initEventId = `${sessionId}|confirmInit|${timeStartExec}`
-	const sessionRoom = colon('sessions', sessionId)
+	const lastDbConnection 	= _get(job,'dbConnection')
+	return withDatabase((db) => {
+		_log('data', job.data)
+		const sessionId 		= _get(job,'data.sessionId')
+		const timeAddQueue 		= _get(job,'data.timeAddQueue')
+		const playerData 		= _get(job,'data.params.playerData')
+		const appName 			= _get(job,'data.params.playerData.appName')
+		const userId 			= _get(job,'data.params.playerData.userId')
+		const timeStartExec 	= Date.now()
+		const initEventId 		= `${sessionId}|confirmInit|${timeStartExec}`
+		const sessionRoom 		= `sessions:${sessionId}`
+		let sessionData, objSessionData, roomList
 
-	//adds playerData to the new object to be set in session:*id*
-	let sessionData = Object.assign({
-		sessionId,
-		initEventId,
-		//initConfirm: ,
-		online: 1,
-		created: Date.now()
-	}, playerData)
+		//adds playerData to the new object to be set in session:*id*
+		sessionData = Object.assign({
+			sessionId,
+			initEventId,
+			online: 1,
+			created: Date.now()
+		}, playerData)
 
-	let objSessionData = objToArr(sessionData)
-	let roomList
-	job.progress(25)
-	//Hook in single app user check
+		objSessionData = objToArr(sessionData)
 
-	return Promise.using(getConnection(isWorker), (client) => {
+		db.defineCommand('initSession', {numberOfKeys: 1, lua: initSession})
+		db.defineCommand('publishToSession', {numberOfKeys: 2, lua: publishToSession})
 
-		return Promise.all([roomQueue, _validatePlayerData(playerData),_validateSessionId((sessionId))])
-			.then(() => sendSsoCheck({ data: {sessionId,appName,userId}, worker: true}))
-			//.tap(log)
-			.then(() => client.initSession(sessionId, objSessionData))
-			//.tap((result) => log('[INIT] Setup', result.toString()))
-			.then(arrToSet)
-			.tap((rooms) => roomList = rooms)
-			.then((rooms) =>
-					subscribe({data: {
-							isInit: true,
-							sessionId,
-							rooms,
-							userId,
-							appName,
-						} })
-				//roomQueue.add('subscribe', )
-			)
-			//.call('finished')
-			//.tap((result) => log('[INIT] Sub Job', result.toString()))
-			//.delay(PUBLISH_DELAY)
-			.then(([sessionId, roomList]) => { //TODO: https://github.com/OptimalBits/bull/issues/340
-				const rooms = remapToObject(roomList)
-				log('test delay start', rooms)
+		const initSessionOnDb = Promise.method(function(){
+			return db.initSession(sessionId, objSessionData)
+				.then(arrToSet)
+				.then((newRoomList) => (roomList = newRoomList))
+				.return('OK')
+		})
 
-				const message = JSON.stringify({
-					phase: "init",
-					room: sessionRoom,
-					_server: {
-						totalTimeInQueue: timeStartExec - timeAddQueue,
-						totalTimeExecute: Date.now() - timeStartExec
-					},
-					response: {
-						initEventId,
-						sessionId: sessionId,
-						userId: userId,
-						appName: appName,
-						rooms: rooms
-					}
-				})
-				return client.publishToSession(sessionId, Date.now(), message)
-			})
-			.tap((result) => log('[INIT] Publish', result.toString()))
+		const subscribeToSystemRooms = Promise.method(function(){
+			if(!roomList) throw new Error('NO ROOM LIST')
+			const rooms = _clone(roomList)
+			return subscribe({db,data: { sessionId,rooms,skipSessionCheck: true} })
+		})
 
-			.then((result) => result.toString())
-			.tapCatch((err) => errlog(err))
-			.tapCatch(() => RoomActions.commandUnSubSession(sessionId, 'error'))
-			.finally(() => {
-				//client.quit()
-			})
-			.catch((err) => {
-				log('error catch')
-				log('[ERROR INIT]' + err.status, err.message)
-				log(err, err.stack.split("\n"))
-				throw new Error('Init Error ' + err.toString())
-			})
-	})
+		const sendInitMessage = Promise.method(function(){
+			if(!roomList) throw new Error('INVALID SUBSCRIPTIONS')
+			const rooms = remapToObject(_clone(roomList))
 
-	//})
+			const message = {
+				phase: "init",
+				room: sessionRoom,
+				_server: {
+					totalTimeInQueue: timeStartExec - timeAddQueue,
+					totalTimeExecute: Date.now() - timeStartExec
+				},
+				response: {
+					initEventId,
+					sessionId: sessionId,
+					userId: userId,
+					appName: appName,
+					rooms: rooms
+				}
+			}
+			return db.publishToSession(sessionId, Date.now(), JSON.stringify(message), JSON.stringify({skipChecks:true})).return('OK')
+		})
 
+		return Promise.all([_validatePlayerData(playerData),_validateSessionId((sessionId))])
+			.tap((result) => {_log('[INIT] validation check', result)})
 
+			.then(() => sendSsoCheck({ db, data: {sessionId,appName,userId}}))
+			.tap((result) => {_log('[INIT] single user check', result)})
+
+			.then(initSessionOnDb)
+			.tap((result) => {_log('[INIT] init Db Session', result)})
+
+			.then(subscribeToSystemRooms)
+			.tap((result) => _log('[INIT] sub to system rooms', _omit(result, 'db')))
+
+			.then(sendInitMessage)
+			.tap((result) => _log('[INIT] send init message', result))
+
+			.tapCatch(_error)
+			.catch((error) => unsubscribe({db, data:{sessionId: sessionId, rooms: roomList, error}}))
+			.return('OK')
+
+	},lastDbConnection)
+		.tap((result) => {_log('[INIT] DONE', _omit(result, 'db'))})
+		.return('OK')
+		.tapCatch((err) => {
+			_error('[Error Init]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
+		})
 }

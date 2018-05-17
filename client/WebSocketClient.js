@@ -3,50 +3,50 @@ const uuid5         = require('uuid/v5')    //https://github.com/kelektiv/node-u
 const debug         = require('debug')      //https://github.com/visionmedia/debug
 const _log          = debug('wsClient')
 const _error        = debug('wsClient:err')
-const store			= require('../store')
-const clientUtil	= require('./clientUtil')
-const get			= require('lodash/get')
+const {getUuid, getMaxBufferSize, clients:{addClient}} = require('../store')
+const {
+	_handleSocketData,
+	_handleSocketError,
+	_handleSocketClose,
+	_handleSocketTimeout
+} = require('./clientUtil')
+
+const _get			= require('lodash/get')
+const _isEqual		= require('lodash/isEqual')
 
 const WebSocketClient = (wsSocket, req) => {
-	const serverUuid = store.getUuid()
-	const maxBufferSize = store.getMaxBufferSize()
+	const serverUuid = getUuid()
+	const maxBufferSize = getMaxBufferSize()
 	const _type = 'ws'
-	const _address = `${get(req, 'headers.x-forwarded-for', get(req, 'connection.remoteAddress', 'invalid'))}:${get(wsSocket, '_socket.remotePort', Date.now())}`
+	const _address = `${_get(req, 'headers.x-forwarded-for', _get(req, 'connection.remoteAddress', 'invalid'))}:${_get(wsSocket, '_socket.remotePort', Date.now())}`
 	const _identifier = uuid5(_address,serverUuid) //use this via server to target
 	const _buffer = Buffer.allocUnsafe(maxBufferSize).fill(0)
 
 	_log('[Open Socket ws]: %s | %s', _address, _identifier)
-	const actions = setupSocket(_identifier, wsSocket)
 
-	return store.clients.addClient({
+	wsSocket.on('message', (data) => _handleSocketData(_identifier, wsSocket, data))
+	wsSocket.on('error', (...args) => {
+		wsSocket.terminate()
+		_handleSocketError(_identifier, wsSocket,args)
+	})
+	wsSocket.on('close', (...args) => _handleSocketClose(_identifier, wsSocket, args))
+	wsSocket.on('timeout', (...args) => _handleSocketTimeout(_identifier, wsSocket, args))
+
+	return addClient({
 		_identifier,
 		_type,
-		...actions, //add additional actions client can perform
-		getClientType: () => _type,
-		getAddress: () => _address,
-		getSessionId: () => _identifier,
-		getBuffer: () => _buffer,
-	})
-}
-
-const setupSocket = (identifier, ws) => {
-	ws.on('message', (data) => clientUtil._handleSocketData(identifier, ws, data))
-	ws.on('error', (...args) => {
-		ws.terminate()
-		clientUtil._handleSocketError(identifier, ws,args)
-	})
-	ws.on('close', (...args) => clientUtil._handleSocketClose(identifier, ws, args))
-	ws.on('timeout', (...args) => clientUtil._handleSocketTimeout(identifier, ws, args))
-
-	return {
+		getClientType() {return _type},
+		getAddress(){ return _address},
+		getSessionId(){ return _identifier},
+		getBuffer(){ return _buffer},
 		send: (message, cb) => {
-			if (!_.isEqual(ws.readyState, WebSocket.OPEN)) return _error('[Socket] not open, skipping.')
+			if (!_isEqual(wsSocket.readyState, WebSocket.OPEN)) return _error('[Socket] not open, skipping.')
 
-			if (!ws.send(message))
-				ws.once('drain', cb)
+			if (!wsSocket.send(message))
+				wsSocket.once('drain', cb)
 			else
 				process.nextTick(cb)
 		}
-	}
+	})
 }
 module.exports = WebSocketClient

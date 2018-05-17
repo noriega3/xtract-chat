@@ -16,7 +16,7 @@ if(ARGV[1] and not cjson.decode(ARGV[1])) then return redis.error_reply('NO VALI
 local sessionId         = KEYS[1]
 local nodeTime			= KEYS[2]
 local params            = ARGV[1] and cjson.decode(ARGV[1]) or {}
-local skipInitCheck		= params.skipInitCheck
+local skipSessionCheck		= params.skipSessionCheck
 local isTest			= params.isTest
 
 if(isTest) then return redis.status_reply('ONLINE') end
@@ -34,7 +34,7 @@ if(redis.call('zadd', rk.tickSessions, 'XX', 'CH', 'INCR', nodeTime, sessionId) 
 end
 
 --check if session has init-ed
-if(not skipInitCheck and redis.call('hget', rk.session, 'initConfirm') ~= sessionId) then
+if(not skipSessionCheck and redis.call('hget', rk.session, 'initConfirm') ~= sessionId) then
 	return redis.error_reply('SESSION NOT INIT')
 end
 

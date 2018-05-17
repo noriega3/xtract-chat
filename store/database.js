@@ -4,17 +4,15 @@ debug.log = console.info.bind(console) //one all send all to console.
 const _log        = debug('database')
 const _error        = debug('database:err')
 
-console.log('\n===========================================================\n-loaded db module-\n===============================================\n')
 const Promise       = require('bluebird')
 const _has    		= require('lodash/has')
+const _hasIn   		= require('lodash/hasIn')
 const _remove		= require('lodash/remove')
 const _size			= require('lodash/size')
 const EventEmitter 	= require('events')
 let Redis         = require('ioredis')
 Promise.promisifyAll(Redis)
 Promise.promisifyAll(Redis.prototype)
-
-const isSubProcess	= _has(process, 'send')
 
 //const dbCommands 	= require('../scripts/redis')
 const dbCommands 	= require('../scripts/redis2')
@@ -26,7 +24,8 @@ dbClient = new Redis({lazyConnect:true})
 
 //Capture unhandled rejects
 Redis.Promise.onPossiblyUnhandledRejection(function (error) {
-	_error('[REDIS ERROR]', error.toString())
+	_error('[REDIS ERROR]', error)
+
 	// you can log the error here.
 	// error.command.name is the command name, here is 'set'
 	// error.command.args is the command arguments, here is ['foo']
@@ -36,7 +35,7 @@ Redis.Promise.onPossiblyUnhandledRejection(function (error) {
 })
 
 const createConnection = (name, opts = process.env.REDIS_DEFAULT) => {
-	_log('new connection')
+	if(dbClient) return dbClient
 	dbClient = new Redis({lazyConnect:true})
 	dbCommands(dbClient)
 	_connections.push(dbClient)
@@ -44,13 +43,18 @@ const createConnection = (name, opts = process.env.REDIS_DEFAULT) => {
 }
 
 const getConnection = function(){
-	return Promise.resolve(createConnection()).disposer(function(connection){
-		if(_has(connection, 'disconnect')) connection.disconnect()
-		_remove(_connections, connection)
+	return Promise.resolve(createConnection()).disposer(function(){
+		if(!dbClient) return
+		if(_hasIn(dbClient, 'disconnect')) dbClient.disconnect()
+		if(_hasIn(dbClient, 'unref')) dbClient.unref()
+		_remove(_connections, dbClient)
+		dbClient = null
+		_log('removed connection', process.title, _connections)
 	})
 }
 
-const withDatabase = function(transaction){
+const withDatabase = function(transaction, optClient){
+	if(optClient) return Promise.try(() => transaction(optClient))
 	return Promise.using(getConnection(), function(connection){
 		return Promise.try(() => transaction(connection))
 	})
@@ -63,14 +67,13 @@ const createQueueClient = (opts) => {
 }
 
 const createSettingsClient = (opts = process.env.SETTINGS_CLIENT) => {
-	let newC = new Redis(opts, {retryStrategy: (times) => Math.min(Math.exp(times), 20000)})
-	newC.client('setname', 'dbSettings')
-	newC.on('end', () => {
-		console.log('end on client')
-		_remove(_connections, newC)
-	})
-
-	if(_connections.push(newC)) return newC
+	const store = require('.')
+	let connection = new Redis(opts, {retryStrategy: (times) => Math.min(Math.exp(times), 20000)})
+	connection.client('setname', 'dbSettings')
+	connection.defineCommand('getConfig', {numberOfKeys: 0, lua: store.getLua('./scripts/redis2/getConfig.lua')})
+	connection.defineCommand('setConfig', {numberOfKeys: 0, lua: store.getLua('./scripts/redis2/setConfig.lua')})
+	Promise.promisifyAll(connection)
+	if(_connections.push(connection)) return connection
 	throw new Error('Invalid Settings Client Created')
 }
 

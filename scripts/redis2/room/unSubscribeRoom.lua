@@ -158,6 +158,7 @@ local publishUnSubscribe = function()
 	response.userId = userId
 	response.bot = isClientBot or nil
 	response.roomSubscribeType = redis.call('hget', rk.roomInfo, 'roomSubscribeType')
+	response.errorMessage = unSubParams.errorMessage and _tostring(unSubParams.errorMessage)
 
 	--set dataToSend.sessionIds
 	if(roomExists) then --for unsubscribe, we will push the message to a user even if room is destroyed

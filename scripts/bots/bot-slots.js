@@ -1,10 +1,10 @@
 "use strict"
 const debug         = require('debug') //https://github.com/visionmedia/debug
-let _log          = debug('bot')
+let _log          = debug('botSlots')
 const Promise       = require('bluebird')
 const store  = require('../../store')
 const withDatabase = store.database.withDatabase
-const SubClient = require('./subscriber')
+const SubClient = require('./bot')
 const helper = require("../../util/helpers")
 
 const getRandomUserName = () => {

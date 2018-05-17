@@ -63,7 +63,6 @@ process.stdin.resume()
 
 Promise.all([WebSocketDashboard.start(), WebSocketProxyServer.start()])
 	.then(() => {
-		_logserver('[Server]:  WS Servers Launched')
 		process.stdin.resume()
 	})
 	.catch((err) => {

@@ -1,8 +1,5 @@
 --require test/mocha.env.js
---harmony
 --trace-warnings
 --use-strict
---max_old_space_size=500
---trace-deprecation
 --bail
 --exit

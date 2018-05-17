@@ -3,15 +3,20 @@ const _log          = debug('subJob')
 const _error        = debug('errorSubJob')
 const store			= require('../../store')
 const db			= store.database
+
+const _includes 	= require('lodash/includes')
+
 const RoomActions 	= require('../room/shared')
 const unsubscribe	= require('./unsubscribe')
 _log('created new instance')
+
+process.title = _includes(process.title, '/bin/node')? 'node_invite' : process.title
 
 module.exports = (job) => {
 	const client        = db.createConnection('jobInvite')
 
 	const data = job.data
-	const skipInitCheck = data.isInit
+	const skipSessionCheck = data.skipSessionCheck
 	const sessionId 	= data.sessionId
 	let roomList 		= data.rooms ? data.rooms : []
 	let params 			= data.params || {}
@@ -32,7 +37,7 @@ module.exports = (job) => {
 	}
 
 	//Check if session is active
-	return client.checkSessionState(sessionId, Date.now(), JSON.stringify({skipInitCheck}))
+	return client.checkSessionState(sessionId, Date.now(), JSON.stringify({skipSessionCheck}))
 		//.tap((result) => _log('[SUB] State', result.toString()))
 
 		//Filter any duplicate game rooms passed in.

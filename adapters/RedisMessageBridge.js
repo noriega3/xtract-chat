@@ -1,7 +1,8 @@
 const debug         = require('debug') //https://github.com/visionmedia/debug
-const Promise       = require('bluebird')
 const _log        	= debug('redisBridge')
 const _error        = debug('redisBridge:err')
+
+const Promise       = require('bluebird')
 const util       	= require('../util/helpers')
 const store       	= require('../store')
 const db			= store.database
@@ -14,6 +15,9 @@ const _isEmpty	= require('lodash/isEmpty')
 const _isObject	= require('lodash/isObject')
 const _includes	= require('lodash/includes')
 const _isEqual	= require('lodash/isEqual')
+
+const _isJson = require('../util/isJson')
+const _toJson = require('../util/toJson')
 
 const rooms = ['sessions|*','rooms|*','bot|*']
 
@@ -44,7 +48,7 @@ const sendMessages = (messages, sessionIds, dateInSeconds) => {
 Subscriber.psubscribe(rooms)
 Subscriber.on('pmessage', (pattern, channel, rawMessages) => {
 	if(!_includes(rooms, pattern)) return
-	const parsed = rawMessages && util._isJson(rawMessages) ? util._toJson(rawMessages) : {}
+	const parsed = rawMessages && _isJson(rawMessages) ? _toJson(rawMessages) : {}
 	const dateInSeconds = Date.now() / 1000
 	const sessionIds = _get(parsed, 'sessionIds', [_get(parsed, 'sessionId', '')])
 	const messages = _get(parsed, 'messages', [_get(parsed, 'message', {})])

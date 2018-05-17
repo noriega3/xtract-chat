@@ -1,4 +1,7 @@
 "use strict"
+let apm = require('elastic-apm-node').start({
+	serviceName: 'httpServer'
+})
 const debug     = require('debug') //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
 const _log = debug('httpServer')
@@ -11,26 +14,28 @@ const Promise 	= require('bluebird') //http://bluebirdjs.com/docs/api-reference.
 
 const store       = require('./store')
 store.createStore()
+const database = store.database
 
 //queues
 const ApiEventQueue = require('./eventQueue/ApiEventQueue')()
-
-//servers
 const ApiServer = require('./server/ApiServer')()
-
-require('./scripts/room/shared') //getters and setters for rooms
+const serverScripts = Promise.promisifyAll(require('./scripts/server'))
 
 //process.stdin.resume()
 
-const serverScripts = Promise.promisifyAll(require('./scripts/server'))
 const _startServers = (cb) => {
-	return serverScripts.updateServerConfig()
-		.tap((serverConfig) => _log('[Server Configs]: Update Finished \n%O', serverConfig))
-		.tap(() => _log(ApiServer))
-		.then(() => ApiServer.start())
+	return serverScripts.syncSettings()
+		.tap((serverConfig) => _log('[Server Configs]:', serverConfig))
+		.tap(() => {
+
+			_log(ApiServer)
+		})
+		.then((serverConfig) => {
+			_log('c2fg', store.setConfig(serverConfig))
+			return ApiServer.start()
+		})
 		.tap(() => cb && cb(true))
 		.then(() => {
-			_log('[Server]: Servers Launched')
 			if (process.send) process.send('ready')
 			return 'OK'
 		})
@@ -46,7 +51,8 @@ const _closeServers = (processExit = true) => {
 
 	return Promise.all([
 			ApiServer.close(),
-			ApiEventQueue.close()
+			ApiEventQueue.close(),
+			database.close()
 		])
 		.timeout(10000)
 		.then((result) => _log('[Server] Gracefully shut down http servers.', result))
@@ -86,15 +92,11 @@ _log(`[Memory Usage]: ${used} MB`)
 
 
 module.exports = {
-	init: function(cb) {
-		return _startServers(cb)
-	},
-	destroy: function(cb) {
-		return cb(_closeServers())
-	}
+	init(cb){ return _startServers(cb) },
+	destroy(cb) { return cb(_closeServers()) }
 }
 
-if(!process.env.MOCHA) _startServers()
+if(!process.env.MOCHA) 	setImmediate(() => _startServers())
 process.stdin.resume()
 
 

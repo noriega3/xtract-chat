@@ -1,51 +1,68 @@
 const debug         = require('debug')      //https://github.com/visionmedia/debug
-const _log          = debug('ps_socklisten')
-const _error          = debug('error')
-const _       = require('lodash')
-const helper = require("../util/helpers")
+const _log          = debug('clientUtil')
+const _error        = debug('clientUtil:err')
+
+
+const _isEqual		= require('lodash/isEqual')
+const _isBuffer		= require('lodash/isBuffer')
+const _includes		= require('lodash/includes')
+const _get			= require('lodash/get')
+const _has			= require('lodash/has')
+
+const _isJson = require('../util/isJson')
+
+console.log('new instance of client Util')
+const helper 		= require("../util/helpers")
 const store			= require('../store')
+
 const addConfig = {
 	attempts: 3,
 	timeout: 5000,
+	backoff: 1000,
 	removeOnComplete: false,
 }
-module.exports._handleSocketError = (identifier, socket, error) => {
-	store.clients.removeClientById(identifier)
-	return socket.destroy(error)
-}
 
-module.exports._handleSocketClose = (identifier, socket, hasError) => {
-	const sessionQueue  = store.queues.getQueueByName('sessionQueue')
+module.exports = {
+	_handleSocketError: (identifier, socket, error) => {
+		store.clients.removeClientById(identifier)
+		return socket.destroy(error)
+	},
 
-	_log('[Close Socket]: %s', identifier)
-	store.clients.removeClientById(identifier)
-	if(socket.destroy) socket.destroy()
-	socket.unref()
-	return sessionQueue.add('destroy', {sessionId: identifier}, addConfig)
-}
+	_handleSocketClose: (identifier, socket, hasError) => {
+		const sessionQueue  = store.queues.getQueueByName('sessionQueue')
 
-module.exports._handleSocketTimeout = (socket, identifier) => {
-	//TODO: redis set flag that user expired, set a timer from here to allow them one more turn on turn based or x seconds
-	socket.end()
-}
-module.exports._handleSocketData = (identifier, socket, rawData) => {
+		_log('[Close Socket]: %s', identifier)
+		store.clients.removeClientById(identifier)
+		if(socket.end) socket.end()
+		if(socket.destroy) socket.destroy()
+		socket.unref()
+		return sessionQueue.add('destroy', {sessionId: identifier}, addConfig)
+	},
 
-	let data = _.isBuffer(rawData) ? _handleBuffer(socket, rawData) : rawData
-
-	if(_.includes(data, '__ENDCONNECTION__')) {
+	_handleSocketTimeout: (socket, identifier) => {
+		//TODO: redis set flag that user expired, set a timer from here to allow them one more turn on turn based or x seconds
 		socket.end()
-		return
+	},
+	_handleSocketData: (identifier, socket, rawData) => {
+
+		let data = _isBuffer(rawData) ? _handleBuffer(socket, rawData) : rawData
+
+		if(_includes(data, '__ENDCONNECTION__')) {
+			socket.end()
+			return
+		}
+
+		if(_includes(data, '__INIT__') && _includes(data, '__ENDINIT__'))
+			_handleInit(identifier, socket, data)
+
+		if(_includes(data, '__JSON__START__') && _includes(data, '__JSON__END__'))
+			_handleJson(identifier, socket, data)
+
+		if(_includes(data, '__STATUS__'))
+			_handleStatus(identifier, socket, data)
 	}
-
-	if(_.includes(data, '__INIT__') && _.includes(data, '__ENDINIT__'))
-		_handleInit(identifier, socket, data)
-
-	if(_.includes(data, '__JSON__START__') && _.includes(data, '__JSON__END__'))
-		_handleJson(identifier, socket, data)
-
-	if(_.includes(data, '__STATUS__'))
-		_handleStatus(identifier, socket, data)
 }
+
 
 const _handleBuffer = (socket, data) => {
 	_log('[Socket] is a buffer true | converted \n', data.toString())
@@ -57,25 +74,29 @@ const _convertStrInitToObject = (data) => {
 	const initEnd = data.lastIndexOf('__ENDINIT__')
 	if(initStart !== -1 && initEnd !== -1) {
 		const str = data.slice(initStart + 8, initEnd)
-		return helper._isJson(str) ? JSON.parse(str) : {}
+		return _isJson(str) ? JSON.parse(str) : {}
 	}
 	console.log('something is wrong', initStart, initEnd)
 	return false
 }
 
 const _handleInit = (identifier, socket, data) => {
-	const sessionQueue  = store.queues.getQueueByName('sessionQueue')
 	const json = _convertStrInitToObject(data)
+	const RequestEventQueue = store.queues.getQueueByName('requestQueue')
 
-	sessionQueue.add('initSession',{
-			sessionId: identifier,
-			playerData: json,
-			timeAddQueue: Date.now()
+	RequestEventQueue.add({
+			queue:'sessionQueue',
+			intent:'initSession',
+			jobData:{
+				sessionId: identifier,
+				params:{
+					playerData: json,
+					timeAddQueue: Date.now()
+				}
+			}
 		}, addConfig)
-		//.then((nestedJob) => nestedJob.finished())
-		.catch((err) => {
-			_error('disconnecting due to error', err)
-		})
+		//.tap(_log)
+		.tapCatch(_error)
 }
 
 const _convertStrJsonToObject = (data) => {
@@ -85,82 +106,93 @@ const _convertStrJsonToObject = (data) => {
 
 	if(jsonStart !== -1 && jsonEnd !== -1) {
 		const str = data.slice(jsonStart + 15, jsonEnd)
-		return helper._isJson(str) ? JSON.parse(str) : {}
+		return _isJson(str) ? JSON.parse(str) : {}
 	}
 	return false
 }
 
 const _handleJson = (identifier, socket, data) => {
-	const roomQueue  = store.queues.getQueueByName('roomQueue')
-	const sessionQueue  = store.queues.getQueueByName('sessionQueue')
-
+	const RequestEventQueue = store.queues.getQueueByName('requestQueue')
 	const json = _convertStrJsonToObject(data)
 	const sessionId = identifier
 	if(!json) return _error('invalid json received')
 
 	const _handleIntent = (socket, identifier, intent, json) => {
-		const room = _.get(json, 'roomName', _.get(json, 'room')) //fix differs of room and roomName into one inline if (lodash)
+		const room = _get(json, 'roomName', _get(json, 'room')) //fix differs of room and roomName into one inline if (lodash)
+		let jobData = {sessionId, room, params: _get(json, 'params', data)}
+		let queue
+
 		//Determine route based on intent
 		switch (intent) {
 			//session queue, uses params
 			case "confirmInit":
 			case "keepAlive":
-				sessionQueue.add('confirmInit', {sessionId, params: json.params}, addConfig)
+				console.log('data from initConfirm', intent, json)
+				queue = 'sessionQueue'
 				break
 			//room queue, uses params
 			case "subscribe":
 			case "unsubscribe":
-				roomQueue.add(intent, {sessionId, room, params: json.params}, addConfig)
+				queue = 'roomQueue'
 				break
-
 			//custom variables passed through
 			case "ssoCheck": //SSO = single sign-off logic
-				sessionQueue.add('sendSsoCheck', {sessionId, appName: json.appName, userId: json.userId}, addConfig)
+				queue = 'sessionQueue'
 				break
 			case "ssoLogout": //SSO = single sign-off logic
-				sessionQueue.add('verifySsoCheck', {sessionId, rawMessage: json}, addConfig)
+				//todo: not integrated yet
+				queue = 'sessionQueue'
+				//params = {sessionId, rawMessage: json}
 				break
 			case "disconnect":
-				helpers.disconnectSocket(sessionId)
-				break
+				console.log('disconnect has been requested')
+				if(_has(socket, 'close')) socket.close()
+				if(_has(socket, 'end')) socket.end()
+				return
 			case "sendChatToRoom":
 				//TODO: restructure to follow the {intent, params} format and possibly split to another socket connection?
-				roomQueue.add('sendChatToRoom', {sessionId: json.sessionId, userId: json.userId, room, message: json.message, eventId: json.eventId}, {priority: 1, ...addConfig})
+				queue = 'roomQueue'
+				//params = {sessionId: json.sessionId, userId: json.userId, room, message: json.message, eventId: json.eventId}
 				break
 			case "syncSessionData":
-				roomQueue.add('prepareSyncSessionData', {sessionId, params: data}, addConfig)
+				queue = 'roomQueue'
 				break
 			case "sendRoomEvent": //whoever sends will need to verify when the server sends back an eventId
-				roomQueue.add('prepareRoomEvent', {sessionId, params: data}, addConfig)
+				queue = 'roomQueue'
 				break
 			//in conjunction with above, will confirm
 			// (sender - proceeds to send event response to room)
 			// (receiver - confirms w/ server that they have saw the message)
 			case "confirmRoomEvent":
 			case "eventConfirm":
-				roomQueue.add('verifyRoomEvent', {sessionId: sessionId, eventId: json.eventId}, {priority: 2, ...addConfig})
+				queue = 'roomQueue'
+				//params = {sessionId: sessionId, eventId: json.eventId}
 				break
 			case "sendMatchEvent":
-				roomQueue.add('sendMatchEvent', {sessionId: sessionId, room, eventId: json.eventId, params: json.params}, addConfig)
-				break
-			default:
-				_error("No intent defined for data: ", json)
+				queue = 'roomQueue'
+				//params =  {sessionId: sessionId, room, eventId: json.eventId, params: json.params}
 				break
 		}
+
+		RequestEventQueue.add({queue,intent,jobData}, addConfig)
+			.call('finished')
+/*			.tap((result) => {
+				//TODO: use this when confirming submission of this session's intents (all others will go through redismessagebridge
+				_log('result', result)
+			})*/
 	}
 
-	if(_.has(json, 'intent'))
+	if(_has(json, 'intent'))
 		_handleIntent(identifier, socket, json.intent, json)
 }
 
 const _handleStatus = (identifier, socket, data) => {
 	const offline = false
-	if(_.isEqual(offline, true)){
+	if(_isEqual(offline, true)){
 		socket.close(-1)
 	} else {
 		socket.send("OK")
 	}
-	return true
 }
 /*
 const helpers = {
@@ -290,7 +322,7 @@ const handleDataJson = (socket, data) => {
 const onSocketData = (socket, dataRaw) => {
 	let data = dataRaw
 
-	if(_.isBuffer(dataRaw)) {
+	if(_isBuffer(dataRaw)) {
 		data = handleBuffer(socket, dataRaw)
 	}
 

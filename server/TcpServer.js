@@ -5,8 +5,10 @@ const _error 	= debug('tcpServer:err')
 
 //npm/node modules
 const Promise 	= require('bluebird') //http://bluebirdjs.com/docs/api-reference.html
-const _ 		= require('lodash')
 const net		= require('net') //https://nodejs.org/api/net.html
+
+const _invokeMap = require('lodash/invokeMap')
+const _isEqual = require('lodash/isEqual')
 
 const SERVER_NAME 	= process.env.SERVER_NAME
 const TCP_PORT 		= process.env.TCP_SERVER_PORT
@@ -15,7 +17,6 @@ const TcpClient		= require('../client/TcpClient')
 const store			= require('../store')
 const servers		= store.servers
 const clients		= store.clients
-const queues		= store.queues
 
 const _identifier = 'TcpServer'
 
@@ -26,7 +27,7 @@ const TcpServer = () => {
 
 	const _closeServer = () => {
 		const sendMessages = () => {
-			_.invokeMap(clients.getClients(), 'send', JSON.stringify({
+			_invokeMap(clients.getClients(), 'send', JSON.stringify({
 				phase: 'disconnected',
 				room: 'Server',
 				serverTime: Date.now(),
@@ -63,7 +64,6 @@ const TcpServer = () => {
 			})
 	}
 
-
 	_nodeServer.on('connection', TcpClient)
 
 	_nodeServer.on('close', (exitCode) => {
@@ -72,28 +72,25 @@ const TcpServer = () => {
 	})
 
 	_nodeServer.on('error', (e) => {
-		if (_.isEqual(e.code, 'EADDRINUSE')) {
+		if (_isEqual(e.code, 'EADDRINUSE')) {
 			_error('[Error]: Address in use, retrying...')
 			setTimeout(() => { _nodeServer.close(() => _nodeServer.listen(TCP_PORT, '::')) }, 1000)
 		} else {
 			_error('[Error]: General\n%s', e.message)
-			_closeServer(e).then(() => {process.kill(process.pid)})
+			_closeServer(e)
 		}
 	})
 
 	_nodeServer.once('listening', () => {
-		const properties = _nodeServer.address()
-		_log('[Server] Listening on port: %s %s %s %s', properties.address, properties.port, properties.family, SERVER_NAME)
+		const {address = 'n/a', port = -1, family = 'n/a'} = _nodeServer.address()
+		_log('[Server] Listening on port: %s %s %s %s', address, port, family, SERVER_NAME)
 	})
 
 	return servers.addServer({
 		_identifier,
-		getServer: () => _nodeServer,
-		start: () => {
-			_log('node server props', _nodeServer)
-			return _nodeServer.listen(TCP_PORT, '::')
-		},
-		close: () => _closeServer()
+		getServer() { return _nodeServer},
+		start() { return _nodeServer.listen(TCP_PORT, '::')},
+		close() { return _closeServer()}
 	})
 }
 

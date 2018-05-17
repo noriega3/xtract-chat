@@ -1,4 +1,7 @@
 "use strict"
+let apm = require('elastic-apm-node').start({
+	serviceName: 'pubsubServer'
+})
 const debug     = require('debug') //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
 const _log = debug('pubSub')
@@ -28,18 +31,21 @@ const printMemoryUsage = require('./util/printMemoryUsage')
 
 //npm/node modules
 const Promise 	= require('bluebird') //http://bluebirdjs.com/docs/api-reference.html
+const fs 		= Promise.promisifyAll(require('fs'))
 
 const store	= require('./store')
 store.createStore()
-const database = store.database
-const getConnection = store.database.getConnection
+
 const queues = store.queues
+const database = store.database
+const withDatabase = database.withDatabase
 
 //queues
 require('./eventQueue/BotEventQueue')()
 require('./eventQueue/RoomEventQueue')()
 require('./eventQueue/SessionEventQueue')()
-require('./eventQueue/TickEventQueue')()
+const tickerQueue = require('./eventQueue/TickEventQueue')()
+require('./eventQueue/RequestEventQueue')()
 
 //servers
 const TcpServer = require('./server/TcpServer')()
@@ -99,7 +105,6 @@ const serverScripts = Promise.promisifyAll(require('./scripts/server'))
 
 //process.stdin.resume()
 const _resetDatabaseStore = () => {
-	let withDatabase = store.database.withDatabase
 	return withDatabase((connection) => {
 		return connection.pipeline()
 			.flushdb()
@@ -107,21 +112,39 @@ const _resetDatabaseStore = () => {
 			.set('bots|nextId', 50000)
 			.sadd('bots|usernames', "Not You", "Player202020", "player 50", "Android Guy", "Guy", "You")
 			.exec()
-	})
+			.return('OK')
+			.catchReturn('FAIL')
+	}).return('OK')
 }
 
 const _startServers = (cb) => {
-	return serverScripts.updateServerConfig()
-		.tap((serverConfig) => _log('[Server Configs]: Update Finished', serverConfig))
+	return serverScripts.syncSettings()
+		.tap((serverConfig) => _log('[Server Configs]:', serverConfig))
 		.then(_resetDatabaseStore)
 		.then(TcpServer.start)
 		.tap(() => cb && cb(true))
+		//.then(() => tickerQueue.add('matchUpdates', { timeStart: Date.now() }, {repeat: { cron: '*/1 * * * * *'}})) 		//5 sec tick rate
+		//.then(() => tickerQueue.add('roomUpdates', { timeStart: Date.now() }, {repeat: { cron: '*/10 * * * * *'}})) //10 sec tick rate
+		.then(() => tickerQueue.add('idle', { timeStart: Date.now() }, {repeat: { cron: '*/1 * * * * *'}})) 		//idle ticker
 		.then((response) => {
-			_log('[Server]: Servers Launched', response)
 			printMemoryUsage('SVROPEN')
 			if (process.send) process.send('ready')
+			const trans = apm.startTransaction("pubsub", "status")
+
+			trans.result = 200
+			trans.end()
+
+/*			setTimeout(() => {setInterval(function(){
+				global.gc()
+				const used = process.memoryUsage()/!*Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100*!/
+				console.log(`[Memory Usage]: MB`, used)
+
+			}, 1000)}, 6000)*/
+
 			return 'OK'
 		})
+		.then(() => fs.writeFileAsync('./online.txt', Date.now()))
+		.return('OK')
 		.tapCatch(() => cb && cb(false))
 		.catch((err) => {
 			_error('[Error]: On Launching', err)
@@ -142,6 +165,7 @@ const _closeServers = (processExit = true) => {
 			_log('[Server] Gracefully shut down servers.', result)
 			printMemoryUsage('SVRCLOSE')
 		})
+		.then(() => fs.writeFileAsync('./online.txt', -1))
 		.return('OK')
 		.catch((err) => {
 			_log('[Server] Abruptly shutdown servers.\n', err)
@@ -173,21 +197,17 @@ process.once('uncaughtException', _onUnhandledError) //Process any uncaught exce
 process.once('unhandledRejection', _onUnhandledRejection)
 
 //***************************************************************************//
-
 const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100;
 _log(`[Memory Usage]: ${used} MB`)
-
-
 module.exports = {
-	init: function(cb) {
+	init(cb) {
 		return _startServers(cb)
 	},
-	destroy: function(cb) {
+	destroy(cb) {
 		return cb(_closeServers())
 	}}
 
-if(!process.env.MOCHA) process.nextTick(_startServers)
-process.stdin.resume()
-
-
+if(!process.env.MOCHA) {
+	setImmediate(() => _startServers())
+}
 

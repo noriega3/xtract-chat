@@ -125,3 +125,5 @@ if(roomData['roomGame'] and roomData['roomAppGameName'] and roomData['roomAppGam
 		redis.call('zadd', rk.countsAppGameThemeName, gameCount, roomData['roomGame'])
 	end
 end
+
+return redis.status_reply('OK')

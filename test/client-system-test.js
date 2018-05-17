@@ -46,6 +46,7 @@ it('init', function(done){
 	emitter.once('confirmInit', function(res){
 		expect(res).be.an('object')
 		res.should.have.nested.property('response.initEventId')
+		res.response.initEventId.should.equal('OK')
 		done()
 	})
 })
@@ -69,7 +70,6 @@ it('subscribed', function(done) {
 		}
 	})
 })
-
 
 it('unsubscribed', function(done) {
 	actions.requestUnSubscribe(roomName)

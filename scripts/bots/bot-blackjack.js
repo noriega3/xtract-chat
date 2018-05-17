@@ -7,7 +7,7 @@ const _         = require('lodash') //https://github.com/visionmedia/debug
 const Promise   = require('bluebird')
 const store     = require('../../store')
 const withDatabase		= store.database.withDatabase
-const SubClient = require('./subscriber')
+const SubClient = require('./bot')
 const helper = require("../../util/helpers")
 
 const getRandomUserName = () => {

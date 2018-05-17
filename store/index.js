@@ -1,3 +1,4 @@
+const fs 		= require('fs')
 const uuid4 	= require('uuid/v4')
 //load all stores into this module so we only have to require /store to access all of them
 const _isEqual		= require('lodash/isEqual')
@@ -22,11 +23,12 @@ const getMaxBufferSize = () => _toInteger(process.env.TCP_CLIENT_BUFFER_SIZE)
 const setConfig = (updated) => { _config = updated }
 const getConfig = (key) => key ? _get(_config, key, false) : _config
 const getMaintenanceMode = () => _isEqual(_get(_config, 'maintenanceMode', 1), 1)
-const getAppNameList = () => _get(_config, 'appNameList', _stubObject)
+const getAppNameList = () => _get(_config, 'appNames')
+const getLua = (path) => fs.readFileSync(path, {encoding: 'utf-8', flag: 'r'})
 
 //singleton
 exports = module.exports = {
 	createStore, getServerName, getUuid, getMaxBufferSize, setConfig, getConfig,
-	getMaintenanceMode,getAppNameList,
+	getMaintenanceMode,getAppNameList, getLua,
 	database, clients, queues, servers
 }

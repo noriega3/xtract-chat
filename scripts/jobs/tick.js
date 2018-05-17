@@ -1,117 +1,78 @@
+"use strict"
+let apm = require('elastic-apm-node')
+
 const debug         = require('debug') //https://github.com/visionmedia/debug
 debug.log = console.info.bind(console) //one all send all to console.
-const store			= require('../../store')
-const _log 			= debug('tick')
-const _error 		= debug('tick:err')
+const _log 			= debug('tickjob')
+const _error 		= debug('tickjob:err')
 
 const Promise		= require('bluebird')
 
-const getConnection = store.database.getConnection
+const _get			= require('lodash/get')
+const _isEqual 		= require('lodash/isEqual')
+const _includes		= require('lodash/includes')
+const _omit 		= require('lodash/omit')
+const _has 			= require('lodash/has')
 
-const _isEqual = require('lodash/isEqual')
-const RoomActions 	= require('../room/shared')
+process.title = _includes(process.title, '/bin/node')? 'node_tick' : process.title
 
+const store			= require('../../store')
+const withDatabase 	= store.database.withDatabase
+
+const dbIdleRooms 	= store.getLua('./scripts/redis2/room/collections/idleRooms.lua')
+const dbDestroyRoom = store.getLua('./scripts/redis2/room/destroyRoom.lua')
+
+console.log("new tick instance")
+
+const roomNameToArr = require('../../util/roomNameToArr')
 //TODO: look into pausing queue again when rooms are empty, then resuming when we have tick via session/room queue
-const hasRooms = () => {
-	return Promise.using(getConnection(), (client) => {
-		return client.exists('tick|rooms', (err, result) => _isEqual(1, result))
-	})
-}
-
-const removeIdleRooms = () => {
-	const nodeTime = Date.now()
-	return Promise.using(getConnection(), (client) => {
-		return client.idleRooms(nodeTime, 10000)
-			.each((foundName) => {
-				const roomName = foundName
-				//can either use a job or do it all at once
-				return client.checkIdleRoom(roomName, nodeTime).then((status) => {
-					if (_isEqual('IDLE', status))
-						return RoomActions.destroyRoom(roomName)
-					else
-						return status
-				})
-			})
-	})
-}
-
 module.exports = function(job){
-		process.title = 'node_tick'
+	let lastDbConnection = _get(job, 'db')
+	return withDatabase((db) => {
+		const hasRooms = () => { return db.exists('tick|rooms', (err, result) => _isEqual(1, result))}
 
-	/*
-            const checkExpires = () => {
-                const serverTime = Date.now()
-                const expiredTime = 60000 //60 sec expiration without an update
-                let roomList = []
-                let multi
-                //move expired ones to another table for processing
-                return client.zrangebyscore('tick|rooms', '(0', serverTime-expiredTime, 'LIMIT', 0, 25)
-                    .tap((rooms)=> {
-                        multi = client.multi()
-                    })
-                    .each((roomName) => {
-                        multi.zadd('expires|rooms', 0, roomName)
-                        //get all sessions in the room w/ roomType
-                        return Promise.resolve(RoomActions.findAndDestroyRoom(roomName))
-                    })
-                    .tap(() => {
-                        if(roomList.length > 0){
-                            return multi.exec()
-                        } else {
-                            multi.discard()
-                            return []
-                        }
-                    })
-                    .then((result) => {
-                        return result
-                    })
-                    .tapCatch((err) => {
-                        if(_.has(multi,'discard')) multi.discard()
-                        _error('err @ tick expire', err)
-                    })
-            }
+		const destroyRoom = (db, roomName, appendResponse = {}) => {
+			if(!_has(db, 'destroyRoom')) db.defineCommand('destroyRoom', {numberOfKeys: 2, lua: dbDestroyRoom})
 
-            const checkRoomStates = () => {
-                const serverTime = Date.now()
+			return db.destroyRoom(roomName, Date.now(), JSON.stringify({
+				...roomNameToArr(roomName)
+			}), JSON.stringify(appendResponse))
+		}
 
-                return client.zrangebyscore('tick|rooms', '(0', serverTime-800, 'LIMIT', 0, 25)
-                    .each((roomName) => {
-                        const roomInfoKey = helper._bar('rooms', roomName, 'info')
-                        return client.hmget(roomInfoKey, 'roomTypeId', 'nextMessageId')
-                            .then(([roomType, nextMessageId]) => {
-                                switch(_.toNumber(roomType)){
-                                    case REALTIME_ROOM_TYPE:
-                                        return realTimeActions.processTickEvent(roomName, serverTime, nextMessageId)
-                                    case TURNBASED_ROOM_TYPE:
-                                        return turnBasedActions.processTickEvent(roomName, serverTime, nextMessageId)
-                                    default:
-                                        return 'OK'
-                                }
-                            })
+		const removeIdleRooms = (db) => {
+			if(!_has(db, 'idleRooms')) db.defineCommand('idleRooms', {numberOfKeys: 0, lua: dbIdleRooms})
+			return db.idleRooms(Date.now(), 10000)
+				.each((foundName) => {
+					//can either use a job or do it all at once
+					return db.checkIdleRoom(foundName, Date.now()).then((status) => {
+						if (_isEqual('IDLE', status))
+							return destroyRoom(db, foundName)
+						else
+							return status
+					})
+				})
+		}
 
-                    })
-                    .then((results) => {
-                        return 'OK'
-                    })
-                    .tapCatch((err) => {
-                        _error('err @ tick state', err)
-                    })
-            }*/
-	return Promise.props({hasRooms: hasRooms()})
-		.then(({hasRooms}) => {
-			if(!hasRooms) return 'OK'
-			return Promise.all([
-				removeIdleRooms()//,
-				//checkExpires(),
-				//checkRoomStates(),
-				//sendPush()
-			])
-			//.finally(() => queue.resume())
-		})
-		.tap((results) => {
-			console.log('done processing', results)
+		return Promise.props({hasRooms: hasRooms(db)})
+			.then((props) => {
+				if(!props.hasRooms) return 'OK'
+				return Promise.all([removeIdleRooms(db)])
+
+			})
+			.tapCatch(_error)
+			.return('OK')
+
+	}, lastDbConnection)
+		.tap((result) => {
+			const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100;
+			_log(`[Memory Usage]: ${used} MB`)
+			_log('[TICK] DONE', _omit(result, 'db'))
 		})
 		.return('OK')
-		.tapCatch((err) => console.log('ERROR @ TICK', err.toString()))}
+		.tapCatch((err) => {
+			_error('[Error tick]', err.status, err.message)
+			console.log(err, err.stack.split("\n"))
+		})
+}
 
 

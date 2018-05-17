@@ -1,44 +1,29 @@
 "use strict"
 const debug         = require('debug') //https://github.com/visionmedia/debug
-const _log          = debug('botEventQueue')
-const _error        = debug('botEventErr')
+debug.log = console.info.bind(console) //one all send all to console.
+const _log          = debug('botQueue')
+const _error        = debug('botQueue:err')
+
 const store			= require('../store')
 const queues		= store.queues
-const RoomActions 	= require('../scripts/room/shared')
 const Queue 		= require('../scripts/queue')
+
 const _identifier 	= 'botsQueue'
 
-const BotEventQueue = () => {
+const BotEventQueue = function(){
 	const _queue = Queue(_identifier)
-	setupQueue(_queue)
-	return queues.addQueue({
-		_identifier,
-		getName: () => _identifier,
-		getQueue: () => _queue
-	})
-}
 
-const setupQueue = (queue) => {
+	_queue.process('*', 'scripts/jobs/bots.js')
 
-	queue.process('*', 10,'scripts/jobs/bots.js')
-
-	queue.on('stalled', function(job) {
-		console.log('job stalled')
+	//Clean up the onPlayerSub/Unsubs when many people join at the same time.
+	_queue.on('completed', function(job){
+		_queue.clean(1000)
 	})
 
-	queue.on('error', function(job, err){
-		_log('tick error', err)
-		_log('tick error', job)
+	return queues.addQueue(_identifier,{
+		getName(){ return _identifier },
+		getQueue(){ return _queue }
 	})
-
-	queue.on('global:completed', function(jobId, result) {
-		/*	console.log(`Job ${jobId} completed! Result: ${result}`);
-            queue.getJob(jobId).then(function(job) {
-                job.remove();
-            });*/
-	});
-
-	return {}
 }
 
 //singleton

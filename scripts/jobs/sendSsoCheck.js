@@ -1,32 +1,28 @@
 "use strict"
+let apm = require('elastic-apm-node')
+
 const debug = require('debug')
 debug.log = console.info.bind(console) //one all send all to console.
-const log = debug('sendSsoCheck')
-const errlog = debug('sendSsoCheck:err')
+const _log = debug('sendSsoCheck')
+const _error = debug('sendSsoCheck:err')
 
-const Promise		= require('bluebird')
 const store	        = require('../../store')
-const getConnection = store.database.getConnection
+const withDatabase = store.database.withDatabase
+const sendSsoCheck 	= store.getLua('./scripts/redis2/session/sendSsoCheck.lua')
 
-module.exports = (job) => {
-	const isWorker = job.worker
-	log('in ssoChec1k', job)
+const _get = require('lodash/get')
 
-	const {sessionId,userId,appName} = job.data
-	log('in ssoCheck2')
+module.exports = function(job){
+	const lastDbConnection	= _get(job, 'db')
+	const userId 	= _get(job, 'data.params.userId')
+	const appName 	= _get(job, 'data.params.appName')
+	const sessionId = _get(job, 'data.sessionId')
 
-	return Promise.using(getConnection(isWorker), (client) => {
+	return withDatabase((client) => {
+		client.defineCommand('sendSsoCheck', {numberOfKeys: 2, lua: sendSsoCheck})
 		return client.sendSsoCheck(userId, sessionId, appName)
-			.tap(log)
-			.then((result) => {
-				//_log('sendsso', result)
-				return 'OK'
-			})
-			.catch((err) => {
-				errlog('[Error sendSsoCheck]', err)
-				throw new Error('Error '+ err.toString())
-			})
-		//.finally(() => client.quit())
-	})
-
+			.return('OK')
+			.tapCatch(_error)
+			.catchThrow(new Error('INVALID SSO CHECK'))
+	},lastDbConnection)
 }
