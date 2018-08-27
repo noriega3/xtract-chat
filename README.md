@@ -11,8 +11,10 @@ This is the open source variation that is used on xtractstudios/codes games.
 
 ## How To Install
 
-- [Install]()
-  - [Node.js]()
+##### Server
+ - [Node.js]()
+ - [Redis]()
+##### Available Clients
   - [Corona SDK (Lua)]()
   - [Web Browsers]()
 
@@ -23,10 +25,22 @@ This is the open source variation that is used on xtractstudios/codes games.
 ## Examples
 
 ## API Reference
-  - [Request Layouts](./wiki/RequestLayouts.md)
-  - [Response Layouts](./wiki/ResponseLayouts.md)
+  - [Request Layouts](aa/RequestLayouts.md)
+  - [Response Layouts](aa/ResponseLayouts.md)
   
 ## Changelog   
+
+### 2.0.9f - August 27th 2018 
+- **Note**: we are switching to a more constant update schedule from 2.1.x onwards.
+- Port latest from private project
+- Separate all servers to individual package files (better management of microservices)
+- Add docker compose and docker images to test
+- Fix up A lot of inconsistent folder structures between all servers
+- Integrate socket.io (and eventually convert everything over) for dashboard communication to-from servers
+- Fixup queue system to include api calls within tcpserver
+- Better child process usage for server (still using bull queue)
+- TODO: add one place for config variables
+
 ### 2.0.5a - May 2nd-17th 2018 
 - setup room ticks to get room updates every x seconds
 - fix up bots logic

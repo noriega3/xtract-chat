@@ -1,0 +1,16 @@
+{
+	"_maintenanceMode": 0,
+	"_nextMaintenance": 40404004040400,
+	"appNames": ["", ""],
+	"gcmSenderId": "",
+	"apiSecret": "",
+	"bots:enabledRooms": {
+		"*": 0,
+		"sportsbook:*": 0,
+		"*:lobby": 0,
+		"blackjack:*": 2,
+		"bingo:*": 2,
+		"slots:*": 2,
+		"roulette:*": 2
+	}
+}

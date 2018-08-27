@@ -1,0 +1,29 @@
+.toggle-panel .toggle-header{
+	cursor: pointer;
+	user-select: none;
+}
+
+.toggle-panel .toggle-content input{
+	transform: scaleY(0);
+	transform-origin: top;
+	transition-delay: 500ms;
+	transform-style: preserve-3d;
+	transition: transform 500ms linear;
+}
+
+.toggle-panel .toggle-content.active input{
+	transform: scaleY(1);
+}
+.toggle-panel.show-content .toggle-header{
+	padding-bottom: 15px;
+}
+.toggle-panel.hide-content .toggle-header{
+	padding-bottom: 0;
+}
+.toggle-panel .mui-caret{
+	transition: transform 0.5s;
+}
+
+.toggle-panel.hide-content .mui-caret{
+	transform: rotate(90deg);
+}

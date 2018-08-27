@@ -1,0 +1,45 @@
+settings = {
+    plugins = {
+        ["CoronaProvider.native.popup.social"] = { publisherId = "com.coronalabs" },
+        ["plugin.advertisingId"] = { publisherId = "com.coronalabs" },
+        ["plugin.deltatime"] = { publisherId = "com.julianvidal" },
+        ["plugin.utf8"] = { publisherId = "com.coronalabs" },
+		["plugin.mwc"] = { publisherId = "com.xibalbastudios" },
+        ["plugin.notifications.v2"] = { publisherId = "com.coronalabs" }
+    },
+	orientation = {
+		default = "portrait",
+		supported = { "portrait", "portraitUpsideDown", "landscapeLeft", "landscapeRight" }
+	},
+	android = {
+        coronaWindowMovesWhenKeyboardAppears = true,
+        usesPermissions = {
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "com.android.vending.BILLING"
+        },
+        supportsTV = true,
+        isGame = true,
+        largeHeap = true
+	},
+	iphone = {
+		xcassets = "Images.xcassets",
+		plist = {
+			UILaunchStoryboardName = "LaunchScreen",
+			ITSAppUsesNonExemptEncryption = false, -- This sample doesn't use custom encryption
+		}
+	},
+	window = {
+		titleText = {
+			default = "test client",
+		}
+	},
+    excludeFiles = {
+        all = { "*.svn", ".DS_Store", "*.editorconfig" },
+        iphone = {"Icon-*dpi.png" },
+        android = {"Icon*.png" }
+    }
+}

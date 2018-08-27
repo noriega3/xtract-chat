@@ -1,0 +1,27 @@
+{
+	"name": "xtract-chat-socketio",
+	"version": "2.0.0",
+	"description": "",
+	"private": true,
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"start": "nodemon -L src/app/bin/www",
+		"dev": "nodemon bin/dev.js"
+	},
+	"author": "Brian Noriega",
+	"license": "MIT",
+	"dependencies": {
+		"dotenv": "^6.0.0",
+		"bluebird": "^3.5.1",
+		"bull": "^3.4.4",
+		"debug": "^3.1.0",
+		"lodash": "^4.17.10",
+		"socket.io": "^2.0.4",
+		"socket.io-redis": "^5.2.0"
+	},
+	"devDependencies": {
+		"eslint": "^4.17.0",
+		"eslint-config-airbnb": "^16.1.0",
+		"eslint-plugin-import": "^2.8.0"
+	}
+}

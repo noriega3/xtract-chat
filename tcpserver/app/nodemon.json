@@ -1,0 +1,14 @@
+{
+    "verbose": true,
+	"delay": "2500",
+	"ignore": ["*-test.js", "wiki/*", "*.iml", "online.txt", "config.json", "node_modules/**/node_modules", ".git"],
+	"execMap": {
+		"js": "node",
+		"lua": "lua"
+	},
+	"events": {
+		"start": "echo \"\\x1Bc\"",
+		"restart": "osascript -e 'display notification \"app restarted\" with title \"pubsub server\"'"
+	},
+	"ext": "js,json,lua"
+}

@@ -1,0 +1,29 @@
+//import data charts
+@import "./../../node_modules/react-vis/dist/style";
+
+// import MUI colors
+@import "./../../node_modules/muicss/lib/sass/mui/colors";
+
+// customize MUI variables
+$mui-primary-color:      	mui-color('blue-grey', '800');
+$mui-primary-color-dark: 	mui-color('blue-grey', '900');
+$mui-primary-color-light:	mui-color('blue-grey', '400');
+
+$mui-body-bg-color:			$mui-primary-color-light;
+
+$mui-accent-color:     		mui-color('orange', 'A400');
+$mui-accent-color-dark:		mui-color('orange', 'A400');
+$mui-accent-color-light:	mui-color('orange', 'A200');
+
+$mui-btn-default-bg-color: $mui-accent-color;
+$mui-btn-primary-bg-color: $mui-accent-color;
+$mui-label-font-color: $mui-accent-color;
+$mui-input-border-color-focus: $mui-accent-color;
+
+/*$mui-text-dark:				mui-color('grey','900');
+$mui-text-dark-secondary:	mui-color('grey','600');
+$mui-panel-bg-color:		mui-color('grey', '300');
+$mui-divider-color:			mui-color('grey', '400');*/
+
+// import MUI SASS
+@import "./../../node_modules/muicss/lib/sass/mui";

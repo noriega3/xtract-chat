@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+const debug = require('debug')('app')
+debug.log = console.log.bind(console)
+const app = require('../app')
+const PORT = 6656
+
+app.listen(PORT, function(err) {
+    if(err) debug(err)
+	debug('server is online', PORT)
+	debug(`rest api server listening on port ${PORT}`)
+})

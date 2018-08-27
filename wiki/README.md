@@ -14,6 +14,8 @@
 
 ## Examples
 
+## GDPR Compliance
+
 ## API Reference
-  - [Request Layouts](./RequestLayouts.md)
-  - [Response Layouts](./ResponseLayouts.md)
+  - [Request Layouts](RequestLayouts.md)
+  - [Response Layouts](ResponseLayouts.md)

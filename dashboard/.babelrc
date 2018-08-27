@@ -1,0 +1,13 @@
+{
+  "presets" : [
+	["es2015", { "modules": false }],
+	"stage-3",
+	"react",
+	"env"
+  ],
+  "plugins" : [
+	"lodash",
+	"syntax-object-rest-spread",
+	"react-hot-loader/babel"
+  ]
+}

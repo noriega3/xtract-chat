@@ -56,4 +56,9 @@ typings/
 
 # dotenv environment variables file
 .env
-
+config.js
+config.json
+_ignore
+_old
+.DS_STORE
+.DS_Store

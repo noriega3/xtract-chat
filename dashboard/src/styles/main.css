@@ -1,0 +1,242 @@
+/**
+ * Body CSS
+ */
+html,
+body {
+	height: 100%;
+	background-color: #eee;
+}
+
+html,
+body,
+input,
+textarea,
+button {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+}
+.AutoComplete{
+	z-index: 999;
+}
+#content {
+	position: relative;
+}
+.AutoComplete .search-input > div{
+	margin-bottom: 1px;
+}
+.AutoComplete .widget-list .mui-btn+.mui-btn {
+	margin-left: 0;
+}
+.AutoComplete .widget-list {
+	background-color: white;
+	min-width: 300px;
+	height: 300px;
+	overflow-y: scroll;
+	-webkit-overflow-scrolling: touch;
+}
+.AutoComplete .widget-list.overflow {
+	position: relative;
+	height: 300px;
+	width: 300px;
+	overflow: scroll;
+}
+.loading, .AutoComplete .ScrollableContainer .scrollItem{
+	display: block;
+	border-bottom: 1px #ccc solid;
+	cursor: pointer;
+}
+.AutoComplete .ScrollableContainer .scrollItem:hover{
+	background: #EF6C00;
+	color: white;
+}
+.AutoComplete .ScrollableContainer div.lastChild{
+	border-bottom: none;
+}
+
+.AutoComplete .ScrollableContainer .scrollItem:focus{
+	outline:none;
+	background-color: #777;
+	color: #EEE;
+}
+
+/**
+ * Body CSS
+ */
+html,
+body {
+	height: 100%;
+}
+
+html,
+body,
+input,
+textarea,
+button {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+}
+
+
+/**
+ * Header CSS
+ */
+header {
+	position: fixed;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 2;
+}
+
+
+header a {
+	color: white;
+}
+
+header table {
+	width: 100%;
+}
+
+
+/**
+ * Content CSS
+ */
+#content-wrapper {
+	min-height: 100%;
+
+	/* sticky footer */
+	box-sizing: border-box;
+	margin-bottom: -100px;
+	padding-bottom: 100px;
+}
+
+.modal, .modal-body {
+	outline: none;
+	box-sizing: content-box;
+}
+
+
+/**
+ * Footer CSS
+ */
+/*footer {
+	box-sizing: border-box;
+	height: 100px;
+	background-color: #eee;
+	border-top: 1px solid #e0e0e0;
+	padding-top: 35px;
+}*/
+
+
+#appbar a {
+	color: #fff;
+	text-decoration: none;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+.modal-bg{
+	background: #f8f8f8;
+	width: 100%;
+	height: 100%;
+}
+.autoresize textarea{
+	display: block;
+	overflow: hidden;
+	resize: none;
+}
+
+.hidden{
+	display:none;
+}
+
+/**
+ * Layout CSS
+ */
+#header {
+	position: fixed;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 2;
+	transition: left 0.2s;
+}
+
+#content-wrapper {
+	min-height: 100%;
+	overflow-x: hidden;
+	transition: margin-left 0.2s;
+
+	/* sticky bottom */
+	margin-bottom: -160px;
+	padding-bottom: 160px;
+}
+
+#footer {
+	height: 160px;
+	margin-left: 0px;
+	transition: margin-left 0.2s;
+}
+
+.user-parameter .mui-panel {
+	padding: .89em;
+}
+/*
+@media (min-width: 768px) {
+	#header {
+		left: 200px;
+	}
+
+	#sidedrawer {
+		transform: translate(200px);
+	}
+
+	#content-wrapper, #appbar, #footer {
+		margin-left: 200px;
+	}
+
+	body.hide-sidedrawer #header {
+		left: 0;
+	}
+
+	body.hide-sidedrawer #sidedrawer {
+		transform: translate(0px);
+	}
+
+	body.hide-sidedrawer #content-wrapper {
+		margin-left: 0;
+	}
+
+	body.hide-sidedrawer #footer {
+		margin-left: 0;
+	}
+}
+*/
+
+/**
+ * Footer CSS
+ */
+/*#footer {
+	margin-top: 20px;
+	background-color: #0288D1;
+	color: #fff;
+}
+
+#footer a {
+	color: #fff;
+	text-decoration: underline;
+}
+
+#appbar .mui-btn--fab{
+	box-shadow: none;
+	background: #2196F3;
+	font-size: 20px
+}*/
+
+.json-output{
+	white-space: pre;
+}

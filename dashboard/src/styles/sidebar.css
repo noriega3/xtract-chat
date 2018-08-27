@@ -1,0 +1,443 @@
+#sidedrawer {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	width: 200px;
+	overflow: auto;
+	z-index: 999;
+	background-color: #fff;
+}
+.sidebar-active {
+	left:0;
+}
+
+.overlay {
+	background-color: rgba(0,0,0,0.3);
+	position: fixed;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	z-index: 998;
+	opacity: 0;
+	visibility: hidden;
+}
+.sidebar-active .overlay {
+	opacity: 1;
+	visibility: visible;
+}
+
+/**
+ * Side drawer CSS
+ */
+#sidedrawer-brand {
+	padding-left: 20px;
+}
+
+#sidedrawer ul {
+	list-style: none;
+}
+
+#sidedrawer > ul {
+	padding-left: 0px;
+}
+
+#sidedrawer > ul > li:first-child {
+	padding-top: 15px;
+}
+
+#sidedrawer a {
+	display: block;
+	padding: 15px 22px;
+	cursor: pointer;
+	text-decoration: none;
+}
+
+#sidedrawer a:hover {
+	background-color: #E0E0E0;
+}
+
+#sidedrawer a + ul > li {
+	padding: 6px 0px;
+}
+#appbar-sidenav-icon{
+	position: relative;
+	left: -2px;
+	margin-right: 18px;
+}
+
+#appbar button, #appbar ul{
+	margin-bottom: 0
+}
+
+@media (min-width: 768px) {
+	#header {
+		left: 200px;
+	}
+
+	#sidedrawer {
+
+	}
+
+	#content-wrapper {
+		margin-left: 200px;
+	}
+	#appbar {
+		margin-left: 200px;
+	}
+
+	#footer {
+		margin-left: 200px;
+	}
+
+	.hide-sidedrawer #header {
+		left: 0;
+	}
+
+	.hide-sidedrawer #sidedrawer {
+		width: 0;
+	}
+
+	.hide-sidedrawer #appbar {
+		margin-left: 0;
+	}
+	.hide-sidedrawer #content-wrapper {
+		margin-left: 0;
+	}
+
+	.hide-sidedrawer #footer {
+		margin-left: 0;
+	}
+}
+
+/*
+
+
+
+!**
+ * Body CSS
+ *!
+html,
+body {
+	height: 100%;
+	background-color: #eee;
+}
+
+html,
+body,
+input,
+textarea,
+button {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+}
+.AutoComplete{
+	z-index: 999;
+}
+#content {
+	position: relative;
+}
+.AutoComplete .search-input > div{
+	margin-bottom: 1px;
+}
+.AutoComplete .widget-list .mui-btn+.mui-btn {
+	margin-left: 0;
+}
+.AutoComplete .widget-list {
+	background-color: white;
+	min-width: 300px;
+	height: 300px;
+	overflow-y: scroll;
+	-webkit-overflow-scrolling: touch;
+}
+.AutoComplete .widget-list.overflow {
+	max-height: 300px;
+	position: absolute;
+}
+
+.loading, .AutoComplete .ScrollableContainer .scrollItem{
+	display: block;
+	border-bottom: 1px #ccc solid;
+}
+.AutoComplete .ScrollableContainer div.lastChild{
+	border-bottom: none;
+}
+
+.AutoComplete .ScrollableContainer .scrollItem:focus{
+	outline:none;
+	background-color: #777;
+	color: #EEE;
+}
+
+!**
+ * Body CSS
+ *!
+html,
+body {
+	height: 100%;
+}
+
+html,
+body,
+input,
+textarea,
+button {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+}
+
+
+!**
+ * Header CSS
+ *!
+header {
+	position: fixed;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 2;
+}
+
+
+header a {
+	color: white;
+}
+
+header table {
+	width: 100%;
+}
+
+
+!**
+ * Content CSS
+ *!
+#content-wrapper {
+	min-height: 100%;
+
+	!* sticky footer *!
+	box-sizing: border-box;
+	margin-bottom: -100px;
+	padding-bottom: 100px;
+}
+
+.modal, .modal-body {
+	outline: none;
+	box-sizing: content-box;
+}
+
+
+!**
+ * Footer CSS
+ *!
+!*footer {
+	box-sizing: border-box;
+	height: 100px;
+	background-color: #eee;
+	border-top: 1px solid #e0e0e0;
+	padding-top: 35px;
+}*!
+
+
+.mui-appbar a {
+	color: #fff;
+	text-decoration: none;
+}
+
+* {
+	box-sizing: border-box;
+}
+.nav li {
+	margin: 10px 0;
+}
+
+.modal-bg{
+	background: #f8f8f8;
+	width: 100%;
+	height: 100%;
+}
+.autoresize textarea{
+	display: block;
+	overflow: hidden;
+	resize: none;
+}
+
+.hidden{
+	display:none;
+}
+
+!*.mui-textfield>input:disabled, .mui-textfield>input:read-only, .mui-textfield>textarea:disabled, .mui-textfield>textarea:read-only{
+	opacity: .5;
+}*!
+
+
+!**
+ * Side drawer CSS
+ *!
+#sidedrawer{
+	transform: translate(200px);
+}
+#sidedrawer-brand {
+	padding-left: 20px;
+}
+
+#sidedrawer ul {
+	list-style: none;
+}
+
+#sidedrawer > ul {
+	padding-left: 0px;
+}
+
+#sidedrawer > ul > li:first-child {
+	padding-top: 15px;
+}
+
+#sidedrawer strong {
+	display: block;
+	padding: 15px 22px;
+	cursor: pointer;
+}
+
+#sidedrawer strong:hover {
+	background-color: #E0E0E0;
+}
+
+#sidedrawer strong + ul > li {
+	padding: 6px 0px;
+}
+
+!**
+ * Layout CSS
+ *!
+#header {
+	position: fixed;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 2;
+	transition: left 0.2s;
+}
+
+#sidedrawer {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	width: 200px;
+	left: -200px;
+	overflow: auto;
+	z-index: 2;
+	background-color: #fff;
+	transition: transform 0.2s;
+}
+
+#content-wrapper {
+	min-height: 100%;
+	overflow-x: hidden;
+	transition: margin-left 0.2s;
+
+	!* sticky bottom *!
+	margin-bottom: -160px;
+	padding-bottom: 160px;
+}
+
+#footer {
+	height: 160px;
+	margin-left: 0px;
+	transition: margin-left 0.2s;
+}
+
+!*
+@media (min-width: 768px) {
+	#header {
+		left: 200px;
+	}
+
+	#sidedrawer {
+		transform: translate(200px);
+	}
+
+	#content-wrapper, #appbar, #footer {
+		margin-left: 200px;
+	}
+
+	body.hide-sidedrawer #header {
+		left: 0;
+	}
+
+	body.hide-sidedrawer #sidedrawer {
+		transform: translate(0px);
+	}
+
+	body.hide-sidedrawer #content-wrapper {
+		margin-left: 0;
+	}
+
+	body.hide-sidedrawer #footer {
+		margin-left: 0;
+	}
+}
+*!
+
+
+!*!***!
+ !** Toggle Side drawer*!
+ !**!*!
+!*#sidedrawer.active {*!
+	!*transform: translate(200px);*!
+!*}*!
+!*#content .mui-container-fluid{
+	padding: 0;
+}*!
+body#sidedrawer.mui--show{
+	transform: translate(200px);
+}
+body .sidebar-active #content-wrapper,
+body .sidebar-active #appbar,
+body .sidebar-active #footer {
+	!*margin-left: 200px;*!
+}
+
+!**
+ * Header CSS
+ *!
+
+.sidedrawer-toggle {
+	color: #fff;
+	cursor: pointer;
+	font-size: 20px;
+	line-height: 20px;
+	margin-right: 10px;
+}
+
+.sidedrawer-toggle:hover {
+	color: #fff;
+	text-decoration: none;
+}
+
+
+!**
+ * Footer CSS
+ *!
+!*#footer {
+	margin-top: 20px;
+	background-color: #0288D1;
+	color: #fff;
+}
+
+#footer a {
+	color: #fff;
+	text-decoration: underline;
+}
+
+#appbar .mui-btn--fab{
+	box-shadow: none;
+	background: #2196F3;
+	font-size: 20px
+}*!
+
+.json-output{
+	white-space: pre;
+}
+*/
