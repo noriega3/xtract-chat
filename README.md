@@ -1,5 +1,7 @@
 # xtract.chat
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/noriega3/xtract-chat.svg)](https://greenkeeper.io/)
+
 
 ## General Information
 A pubsub built with scaling in mind. Simply: Node.js tcp server with a redis caching backend.
