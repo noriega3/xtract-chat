@@ -1,0 +1,12 @@
+{
+  "groups": {
+    "default": {
+      "packages": [
+        "dashboard/package.json",
+        "restapi/app/package.json",
+        "socketio/app/package.json",
+        "tcpserver/app/package.json"
+      ]
+    }
+  }
+}
