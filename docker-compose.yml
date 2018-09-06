@@ -1,0 +1,80 @@
+version: '3'
+services:
+  dashredis:
+    image: "redis:alpine"
+    networks:
+    - rest-net
+    ports:
+    - "7070:6379"
+  pubsubredis:
+    image: "redis:alpine"
+    networks:
+    - pubsub-net
+    ports:
+    - "7071:6379"
+  tcpserver:
+    build:
+      context: ./tcpserver
+      dockerfile: Dockerfile
+    env_file:
+    - ./tcpserver/app/.env
+    volumes:
+    - "./tcpserver/app:/usr/src/app"
+    ports:
+    - "7776:7776"
+    - "8080:8080"
+    networks:
+    - ws-net
+    - rest-net
+    - pubsub-net
+  restapi:
+    build:
+      context: ./restapi
+      dockerfile: Dockerfile
+    image: engine/restapi:latest
+    volumes:
+    - "./restapi/app:/usr/src/app"
+    environment:
+      - NODE_ENV=development
+      - PSDB_HOST=pubsubredis
+      - PSDB_PORT=6379
+      - REQDB_HOST=dashredis
+      - REQDB_PORT=6379
+      - IO_URL=http://socketio:1234
+    networks:
+    - ws-net
+    - rest-net
+    - pubsub-net
+    ports:
+      - "6656:6656"
+    external_links:
+    - usersredis
+    depends_on:
+    - dashredis
+    - socketio
+  socketio:
+    build:
+      context: ./socketio
+      dockerfile: Dockerfile
+    image: engine/socket:latest
+    environment:
+      - NODE_ENV=development
+      - PSDB_HOST=dashredis
+      - PSDB_PORT=6379
+      - QUEUE_HOST=pubsubredis
+      - QUEUE_PORT=6379
+    volumes:
+    - "./socketio/app:/usr/src/app"
+    ports:
+      - "1234:1234"
+    depends_on:
+    - pubsubredis
+    networks:
+    - ws-net
+    - pubsub-net
+
+
+networks:
+  ws-net:
+  rest-net:
+  pubsub-net:
